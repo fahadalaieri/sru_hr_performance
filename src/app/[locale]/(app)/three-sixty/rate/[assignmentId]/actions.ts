@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import type { BehavioralLevel } from "@/lib/threeSixty";
+import { canWriteThreeSixtyResponses, type BehavioralLevel, type ThreeSixtyAssignmentStatus } from "@/lib/threeSixty";
 import { resolveApplicableThreeSixtyItems } from "@/lib/threeSixtyAssignmentItems";
 
 const saveSchema = z.object({
@@ -39,6 +39,20 @@ export async function saveThreeSixtyResponse(input: {
   const { assignmentId, itemId, optionId, numericValue, textValue } = parsed.data;
 
   const supabase = await createClient();
+
+  // Answers are writable only while the assignment is still `pending`
+  // (20261006000001). RLS enforces the same rule; this check turns a silent
+  // zero-row UPDATE into an explicit refusal and never trusts the client's
+  // own idea of the assignment's state.
+  const { data: assignment } = await supabase
+    .from("three_sixty_assignments")
+    .select("status")
+    .eq("id", assignmentId)
+    .maybeSingle();
+  if (!assignment) return { ok: false, message: "forbidden" };
+  if (!canWriteThreeSixtyResponses(assignment.status as ThreeSixtyAssignmentStatus)) {
+    return { ok: false, message: "forbidden" };
+  }
 
   const { data: existing } = await supabase
     .from("three_sixty_responses")

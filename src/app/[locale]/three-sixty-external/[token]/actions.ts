@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { BehavioralLevel } from "@/lib/threeSixty";
+import { canWriteThreeSixtyResponses, type BehavioralLevel, type ThreeSixtyAssignmentStatus } from "@/lib/threeSixty";
 import { resolveApplicableThreeSixtyItems } from "@/lib/threeSixtyAssignmentItems";
 
 /**
@@ -55,10 +55,14 @@ export async function saveThreeSixtyExternalResponse(input: {
   const admin = createAdminClient();
   const assignment = await resolveAssignmentByToken(admin, token);
   if (!assignment) return { ok: false, message: "forbidden" };
-  // Mirrors three_sixty_responses_insert's own "status <> excluded" guard --
-  // this path bypasses RLS entirely, so the equivalent check has to be
-  // re-implemented here explicitly.
-  if (assignment.status === "excluded") return { ok: false, message: "forbidden" };
+  // Mirrors three_sixty_responses_insert/_update's "status = 'pending'" rule
+  // (20261006000001) -- this path bypasses RLS entirely through the
+  // service-role client, so the equivalent check has to be re-implemented
+  // here explicitly. A submitted assignment is final: its answers were
+  // counted, and the link's holder must not be able to rewrite them.
+  if (!canWriteThreeSixtyResponses(assignment.status as ThreeSixtyAssignmentStatus)) {
+    return { ok: false, message: "forbidden" };
+  }
 
   const { data: existing } = await admin
     .from("three_sixty_responses")

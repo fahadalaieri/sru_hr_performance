@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { canWriteThreeSixtyResponses } from "./threeSixty";
 import {
   itemsForRelationship,
   validateNominationCounts,
@@ -553,5 +554,19 @@ describe("nominationIdentityKey", () => {
     const a = nominationIdentityKey({ raterEmployeeId: null, externalRaterEmail: "a@example.com" });
     const b = nominationIdentityKey({ raterEmployeeId: null, externalRaterEmail: "b@example.com" });
     expect(a).not.toBe(b);
+  });
+});
+
+describe("canWriteThreeSixtyResponses", () => {
+  it("allows saving answers while the assignment is still pending", () => {
+    expect(canWriteThreeSixtyResponses("pending")).toBe(true);
+  });
+
+  it("locks answers once the assignment has been submitted", () => {
+    expect(canWriteThreeSixtyResponses("submitted")).toBe(false);
+  });
+
+  it("locks answers for an excluded assignment", () => {
+    expect(canWriteThreeSixtyResponses("excluded")).toBe(false);
   });
 });

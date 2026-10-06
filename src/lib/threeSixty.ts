@@ -35,6 +35,18 @@ export const threeSixtyAssignmentStatusLabels: Record<ThreeSixtyAssignmentStatus
   excluded: "مستبعد",
 };
 
+/**
+ * A rater may write (save/edit) responses only while the assignment is still
+ * `pending`. `submitted` is final — the answers have been counted — and
+ * `excluded` never accepts answers. The same rule is enforced in Postgres by
+ * `three_sixty_responses_insert`/`_update` (20261006000001); this helper is
+ * the application-layer mirror used by both the internal and the external
+ * (token) save actions so the two paths cannot drift apart.
+ */
+export function canWriteThreeSixtyResponses(status: ThreeSixtyAssignmentStatus): boolean {
+  return status === "pending";
+}
+
 export type ThreeSixtyNominationStatus = "draft" | "submitted" | "approved" | "returned";
 export const threeSixtyNominationStatusLabels: Record<ThreeSixtyNominationStatus, string> = {
   draft: "مسودة",
