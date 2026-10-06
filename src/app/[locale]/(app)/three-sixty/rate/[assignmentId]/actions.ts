@@ -2,7 +2,9 @@
 
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { canWriteThreeSixtyResponses, type BehavioralLevel, type ThreeSixtyAssignmentStatus } from "@/lib/threeSixty";
+import { validateThreeSixtyResponseWrite } from "@/lib/threeSixtyResponseValidation";
 import { resolveApplicableThreeSixtyItems } from "@/lib/threeSixtyAssignmentItems";
 
 const saveSchema = z.object({
@@ -14,6 +16,30 @@ const saveSchema = z.object({
 });
 
 export type SaveResponseResult = { ok: true } | { ok: false; message: "forbidden" | "invalid_input" | "unknown" };
+
+/**
+ * The items this assignment actually shows -- the subject's job-title levels
+ * (via the SECURITY DEFINER RPC, since a rater's own client has no RLS path
+ * to `job_title_competencies`) fed through the same resolver the survey page
+ * renders from. Shared by save and submit so "what may be answered" and
+ * "what must be answered" can never drift apart.
+ */
+async function applicableItemsForAssignment(
+  supabase: SupabaseClient,
+  assignment: { relationship_code: string; subject_employee_id: string }
+) {
+  const { data: levelRows } = await supabase.rpc("get_three_sixty_subject_levels", {
+    p_subject_employee_id: assignment.subject_employee_id,
+  });
+  return resolveApplicableThreeSixtyItems(
+    supabase,
+    assignment.relationship_code,
+    ((levelRows ?? []) as { competency_id: string; required_level: BehavioralLevel }[]).map((r) => ({
+      competencyId: r.competency_id,
+      requiredLevel: r.required_level,
+    }))
+  );
+}
 
 /**
  * Screen 3's "حفظ تلقائي للمسودة": called directly from the client on
@@ -46,13 +72,33 @@ export async function saveThreeSixtyResponse(input: {
   // own idea of the assignment's state.
   const { data: assignment } = await supabase
     .from("three_sixty_assignments")
-    .select("status")
+    .select("status, relationship_code, subject_employee_id")
     .eq("id", assignmentId)
     .maybeSingle();
   if (!assignment) return { ok: false, message: "forbidden" };
   if (!canWriteThreeSixtyResponses(assignment.status as ThreeSixtyAssignmentStatus)) {
     return { ok: false, message: "forbidden" };
   }
+
+  // The item must be one this assignment actually shows, the option must
+  // belong to the item's own scale, and the stored score comes from the
+  // option -- never from the request. `validate_three_sixty_response()`
+  // (20261006000002) enforces the option/scale/score part in Postgres too.
+  const applicableItems = await applicableItemsForAssignment(supabase, assignment);
+  const item = applicableItems.find((i) => i.id === itemId);
+  const { data: optionRows } = item?.scaleCode
+    ? await supabase
+        .from("three_sixty_rating_scale_options")
+        .select("id, scale_code, numeric_value")
+        .eq("scale_code", item.scaleCode)
+        .is("deleted_at", null)
+    : { data: [] };
+  const validation = validateThreeSixtyResponseWrite(
+    item,
+    (optionRows ?? []).map((o) => ({ id: o.id, scaleCode: o.scale_code, numericValue: Number(o.numeric_value) })),
+    { optionId, numericValue, textValue }
+  );
+  if (!validation.ok) return { ok: false, message: "invalid_input" };
 
   const { data: existing } = await supabase
     .from("three_sixty_responses")
@@ -64,9 +110,7 @@ export async function saveThreeSixtyResponse(input: {
   const patch = {
     assignment_id: assignmentId,
     item_id: itemId,
-    option_id: optionId ?? null,
-    numeric_value: numericValue ?? null,
-    text_value: textValue ?? null,
+    ...validation.patch,
     updated_at: new Date().toISOString(),
   };
 
@@ -122,17 +166,7 @@ export async function submitThreeSixtyAssignment(
   // competency scoping (20260905000001) shipped, that meant "missing" could
   // never reach zero and every submission was silently blocked. Sharing the
   // exact same resolver the rendering page uses fixes both at once.
-  const { data: levelRows } = await supabase.rpc("get_three_sixty_subject_levels", {
-    p_subject_employee_id: assignment.subject_employee_id,
-  });
-  const applicableItems = await resolveApplicableThreeSixtyItems(
-    supabase,
-    assignment.relationship_code,
-    ((levelRows ?? []) as { competency_id: string; required_level: BehavioralLevel }[]).map((r) => ({
-      competencyId: r.competency_id,
-      requiredLevel: r.required_level,
-    }))
-  );
+  const applicableItems = await applicableItemsForAssignment(supabase, assignment);
   const applicableRequired = applicableItems.filter((item) => item.required);
 
   const { data: responses } = await supabase

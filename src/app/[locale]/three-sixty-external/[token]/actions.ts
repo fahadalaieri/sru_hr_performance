@@ -2,7 +2,9 @@
 
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { canWriteThreeSixtyResponses, type BehavioralLevel, type ThreeSixtyAssignmentStatus } from "@/lib/threeSixty";
+import { validateThreeSixtyResponseWrite } from "@/lib/threeSixtyResponseValidation";
 import { resolveApplicableThreeSixtyItems } from "@/lib/threeSixtyAssignmentItems";
 
 /**
@@ -30,6 +32,36 @@ const saveSchema = z.object({
 });
 
 export type SaveResponseResult = { ok: true } | { ok: false; message: "forbidden" | "invalid_input" | "unknown" };
+
+/**
+ * The items this assignment actually shows. Service role bypasses RLS
+ * already, so this reads `job_title_competencies` directly instead of the
+ * `get_three_sixty_subject_levels` RPC -- that RPC requires a real
+ * `auth.uid()`, which a token-based, unauthenticated request never has (see
+ * threeSixtyAssignmentItems.ts's own comment). Shared by save and submit so
+ * "what may be answered" and "what must be answered" can never drift apart.
+ */
+async function applicableItemsForAssignment(
+  admin: SupabaseClient,
+  assignment: { relationship_code: string; subject_employee_id: string }
+) {
+  const { data: subjectProfile } = await admin
+    .from("profiles")
+    .select("job_title_id")
+    .eq("id", assignment.subject_employee_id)
+    .maybeSingle();
+  const { data: levelRows } = subjectProfile?.job_title_id
+    ? await admin.from("job_title_competencies").select("competency_id, required_level").eq("job_title_id", subjectProfile.job_title_id)
+    : { data: [] };
+  return resolveApplicableThreeSixtyItems(
+    admin,
+    assignment.relationship_code,
+    ((levelRows ?? []) as { competency_id: string; required_level: BehavioralLevel }[]).map((r) => ({
+      competencyId: r.competency_id,
+      requiredLevel: r.required_level,
+    }))
+  );
+}
 
 async function resolveAssignmentByToken(admin: ReturnType<typeof createAdminClient>, token: string) {
   const { data } = await admin
@@ -64,6 +96,27 @@ export async function saveThreeSixtyExternalResponse(input: {
     return { ok: false, message: "forbidden" };
   }
 
+  // The item must be one this assignment actually shows, the option must
+  // belong to the item's own scale, and the stored score comes from the
+  // option -- never from the request. This path writes through the
+  // service-role client, so the application check is the only one before
+  // `validate_three_sixty_response()` (20261006000002) in Postgres.
+  const applicableItems = await applicableItemsForAssignment(admin, assignment);
+  const item = applicableItems.find((i) => i.id === itemId);
+  const { data: optionRows } = item?.scaleCode
+    ? await admin
+        .from("three_sixty_rating_scale_options")
+        .select("id, scale_code, numeric_value")
+        .eq("scale_code", item.scaleCode)
+        .is("deleted_at", null)
+    : { data: [] };
+  const validation = validateThreeSixtyResponseWrite(
+    item,
+    (optionRows ?? []).map((o) => ({ id: o.id, scaleCode: o.scale_code, numericValue: Number(o.numeric_value) })),
+    { optionId, numericValue, textValue }
+  );
+  if (!validation.ok) return { ok: false, message: "invalid_input" };
+
   const { data: existing } = await admin
     .from("three_sixty_responses")
     .select("id")
@@ -74,9 +127,7 @@ export async function saveThreeSixtyExternalResponse(input: {
   const patch = {
     assignment_id: assignment.id,
     item_id: itemId,
-    option_id: optionId ?? null,
-    numeric_value: numericValue ?? null,
-    text_value: textValue ?? null,
+    ...validation.patch,
     updated_at: new Date().toISOString(),
   };
 
@@ -109,27 +160,7 @@ export async function submitThreeSixtyExternalAssignment(
   if (!assignment) return { status: "error", message: "forbidden" };
   if (assignment.status !== "pending") return { status: "error", message: "invalid_input" };
 
-  const { data: subjectProfile } = await admin
-    .from("profiles")
-    .select("job_title_id")
-    .eq("id", assignment.subject_employee_id)
-    .maybeSingle();
-  // Service role bypasses RLS already, so this reads job_title_competencies
-  // directly instead of the get_three_sixty_subject_levels RPC -- that RPC
-  // requires a real auth.uid(), which a token-based, unauthenticated
-  // request never has (see threeSixtyAssignmentItems.ts's own comment).
-  const { data: levelRows } = subjectProfile?.job_title_id
-    ? await admin.from("job_title_competencies").select("competency_id, required_level").eq("job_title_id", subjectProfile.job_title_id)
-    : { data: [] };
-
-  const applicableItems = await resolveApplicableThreeSixtyItems(
-    admin,
-    assignment.relationship_code,
-    ((levelRows ?? []) as { competency_id: string; required_level: BehavioralLevel }[]).map((r) => ({
-      competencyId: r.competency_id,
-      requiredLevel: r.required_level,
-    }))
-  );
+  const applicableItems = await applicableItemsForAssignment(admin, assignment);
   const applicableRequired = applicableItems.filter((item) => item.required);
 
   const { data: responses } = await admin
