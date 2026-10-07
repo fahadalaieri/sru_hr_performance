@@ -14,12 +14,13 @@ import { hasDatabase, pgClient } from "./helpers";
  * The allowlist is the honest statement of the gap; shrinking it is the goal.
  */
 const MIGRATIONS_DIR = path.join(process.cwd(), "supabase", "migrations");
-export const KNOWN_NON_REPLAYABLE = new Set([
-  "20260720000002", "20260720000003", "20260720000004", "20260720000005", "20260720000007", // career_path / job_titles by production UUID
-  "20260726000002", // job_title_competencies by production UUID (1196 rows)
-  "20260727000001", "20260727000003", // org-structure positions / job titles by production UUID
-  "20260829000001", "20260831000002", // by name, but assert a prior production data state
-]);
+// One source of truth, shared with scripts/dev-seed/migrate.mjs.
+const nonReplayable = JSON.parse(fs.readFileSync(path.join(process.cwd(), "scripts", "dev-seed", "non-replayable.json"), "utf8")) as {
+  migrations: Array<{ version: string; reason: string }>;
+  duplicateVersions: Array<{ version: string; files: string[] }>;
+};
+export const KNOWN_NON_REPLAYABLE = new Set(nonReplayable.migrations.map((m) => m.version));
+const KNOWN_DUPLICATE_VERSIONS = new Set(nonReplayable.duplicateVersions.map((d) => d.version));
 
 const files = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
 const versionOf = (f: string) => f.slice(0, 14);
@@ -38,6 +39,14 @@ describe("migration files", () => {
 
   it("version prefixes are 14-digit timestamps", () => {
     for (const f of files) expect(versionOf(f), f).toMatch(/^\d{14}$/);
+  });
+
+  it("no NEW duplicate version numbers (the ledger is keyed by version, so twins hide each other's failure)", () => {
+    const byVersion = new Map<string, string[]>();
+    for (const f of files) byVersion.set(versionOf(f), [...(byVersion.get(versionOf(f)) ?? []), f]);
+    const duplicates = [...byVersion.entries()].filter(([, fs]) => fs.length > 1).map(([v]) => v);
+    const unexpected = duplicates.filter((v) => !KNOWN_DUPLICATE_VERSIONS.has(v));
+    expect(unexpected, "rename one file of each pair to a unique version (see scripts/dev-seed/README.md)").toEqual([]);
   });
 });
 
