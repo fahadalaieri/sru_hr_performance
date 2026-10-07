@@ -15,7 +15,7 @@ const eslintConfig = defineConfig([
     // Standalone reference/inspiration file, not part of the app — see
     // HANDOVER.md: built in a separate React sandbox, never integrated
     // into src/app, never run in a browser.
-    "hr_performance_dashboard.jsx",
+    "docs/archive/hr_performance_dashboard.jsx",
   ]),
 ]);
 
