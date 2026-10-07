@@ -22,5 +22,9 @@ export default defineConfig({
     // Linux CI was never affected — this only makes the local run match what
     // CI has been verifying all along.
     pool: "threads",
+    // Integration tests (tests/integration) need a real database and run via
+    // `npm run test:integration` with their own config; the default run and
+    // CI must never pick them up.
+    exclude: ["**/node_modules/**", "**/.next/**", "tests/**"],
   },
 });
