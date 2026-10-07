@@ -3,9 +3,10 @@ import { getTranslations } from "next-intl/server";
 import { buildExportResponse, parseExportFormat, selectColumns } from "@/lib/exportResponse";
 import { EVALUATION_RESULT_EXPORT_COLUMNS, type EvaluationResultExportColumn } from "@/lib/evaluationResultExportColumns";
 import { createClient } from "@/lib/supabase/server";
-import { hasVpraAccess, type ProcessArea, type VpraLevel } from "@/lib/vpra";
+import { hasVpraAccess } from "@/lib/vpra";
 import { resolveEvaluationResultsForCycle } from "@/lib/evaluationResult";
 import type { MethodWeights } from "@/lib/evaluationCycle";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 import {
   DEFAULT_EVALUATION_RESULT_SORT,
   filterEvaluationResults,
@@ -25,14 +26,16 @@ import {
 // re-applied server-side through the same pure helpers the table uses, so
 // the file matches what was on screen when the button was pressed -- these
 // params can only narrow the result, never widen it.
+/**
+ * Export gate = the permission that shows /evaluation-results on screen (custom rule below: evaluationResultsReports>=view OR the caller has direct reports).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [];
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const params = request.nextUrl.searchParams;
   const cycleId = params.get("cycleId");
@@ -50,14 +53,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "invalid_input" }, { status: 400 });
   }
 
-  const { data: permissionRows } = await supabase.rpc("get_my_permissions");
-  const permissions: Partial<Record<ProcessArea, VpraLevel>> = {};
-  for (const row of (permissionRows ?? []) as { process_area: ProcessArea; vpra_level: VpraLevel }[]) {
-    permissions[row.process_area] = row.vpra_level;
-  }
+  const permissions = access.permissions;
   const canViewBroad = hasVpraAccess(permissions.evaluationResultsReports ?? "none", "view");
 
-  const { data: myProfile } = await supabase.from("profiles").select("id").eq("auth_user_id", user.id).maybeSingle();
+  const { data: myProfile } = await supabase.from("profiles").select("id").eq("auth_user_id", access.userId).maybeSingle();
   const { data: reportsData } = myProfile
     ? await supabase.from("profiles").select("id").eq("supervisor_id", myProfile.id).is("deleted_at", null)
     : { data: null };

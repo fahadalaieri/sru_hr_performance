@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { buildExportResponse, parseExportFormat, selectColumns } from "@/lib/exportResponse";
 import { PROMOTION_EXPORT_COLUMNS, type PromotionExportColumn } from "@/lib/promotionExportColumns";
 import { getTranslations } from "next-intl/server";
@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getDisplayTimezone } from "@/lib/systemSettings";
 import { classifyPromotionAgainstCareerPath, promotionStatusLabel } from "@/lib/promotionStatus";
 import { filterPromotions } from "@/lib/promotionTable";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 
 // Excluded from src/proxy.ts's matcher (which skips /api), so no locale or
 // session-refresh runs here — createClient() still works because Route
@@ -23,14 +24,16 @@ import { filterPromotions } from "@/lib/promotionTable";
 // No extra permission gate: `promotions_select` already IS the boundary, and
 // a caller who can see nothing simply gets an empty sheet — the same reasoning
 // as the vacancies export.
+/**
+ * Export gate = the permission that shows /promotions on screen (no gate of its own: promotions_select's RLS (self row or promotions>=view in scope) decides).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [];
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   // The same explicit relationship hints the page itself needs: two FKs to
   // job_titles plus a direct FK to profiles cannot be auto-disambiguated.

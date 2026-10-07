@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { buildExportResponse, parseExportFormat, selectColumns } from "@/lib/exportResponse";
 import { VACANCY_EXPORT_COLUMNS, type VacancyExportColumn } from "@/lib/vacancyExportColumns";
 import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
 import { getDisplayTimezone } from "@/lib/systemSettings";
 import { vacancyStatusLabel } from "@/lib/vacancyStatus";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 import {
   DEFAULT_VACANCY_SORT,
   filterVacancies,
@@ -29,14 +30,16 @@ import {
 // postings are meant to be visible to all staff, 20260719000007), so RLS
 // alone is the right and only boundary here — a caller who can see nothing
 // simply gets an empty sheet.
+/**
+ * Export gate = the permission that shows /vacancies on screen (no gate of its own: vacancies_select grants every vacancies>=view holder, which is all staff by design (20260719000007)).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [];
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const { data } = await supabase
     .from("vacancies")

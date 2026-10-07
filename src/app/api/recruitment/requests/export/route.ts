@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { buildExportResponse, parseExportFormat, selectColumns } from "@/lib/exportResponse";
 import {
   RECRUITMENT_REQUEST_EXPORT_COLUMNS,
@@ -6,10 +6,9 @@ import {
 } from "@/lib/recruitmentRequestExportColumns";
 import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
-import { hasVpraAccess, type ProcessArea, type VpraLevel } from "@/lib/vpra";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 import {
   requestStatusLabel,
-  type RecruitmentPermissions,
 } from "@/lib/recruitmentWorkflow";
 import {
   DEFAULT_REQUEST_SORT,
@@ -29,29 +28,19 @@ import {
 // server-side through the same pure helpers the table uses — so the file
 // matches what the person was looking at when they pressed the button. Those
 // params can only narrow the result, never widen it.
+/**
+ * Export gate = the permission that shows /recruitment/requests on screen (the requests area, or a finance reviewer's budget access).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [
+  { area: "recruitmentRequests", minLevel: "view" },
+  { area: "recruitmentBudget", minLevel: "view" },
+];
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
-
-  const { data: permissionRows } = await supabase.rpc("get_my_permissions");
-  const permissions: RecruitmentPermissions = {};
-  for (const row of (permissionRows ?? []) as { process_area: ProcessArea; vpra_level: VpraLevel }[]) {
-    permissions[row.process_area] = row.vpra_level;
-  }
-  // Same gate as the page itself: the requests area, or a finance reviewer's
-  // budget access. RLS would return nothing anyway — this just answers with a
-  // clear 403 instead of an empty spreadsheet.
-  const canView =
-    hasVpraAccess(permissions.recruitmentRequests ?? "none", "view") ||
-    hasVpraAccess(permissions.recruitmentBudget ?? "none", "view");
-  if (!canView) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const { data: requests } = await supabase
     .from("recruitment_requests")

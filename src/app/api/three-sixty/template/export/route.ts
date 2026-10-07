@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildExportResponse, parseExportFormat } from "@/lib/exportResponse";
 import { threeSixtyTemplateColumnLabels, THREE_SIXTY_TEMPLATE_SHEETS } from "@/lib/threeSixtyTemplateExcel";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 
 // Excluded from src/proxy.ts's matcher, so no locale/session-refresh happens
 // here — createClient() still works because Route Handlers read the
@@ -15,14 +16,16 @@ import { threeSixtyTemplateColumnLabels, THREE_SIXTY_TEMPLATE_SHEETS } from "@/l
 // re-runs exactly that same boundary rather than inventing a stricter one.
 // Every row comes from the caller's own RLS-respecting client, never
 // accepted from the request.
+/**
+ * Export gate = the permission that shows /three-sixty/template on screen (the page itself shows errorForbidden below prepare).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [{ area: "threeSixty", minLevel: "prepare" }];
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const [{ data: raterGroups }, { data: scaleOptions }, { data: competencies }, { data: items }] = await Promise.all([
     supabase

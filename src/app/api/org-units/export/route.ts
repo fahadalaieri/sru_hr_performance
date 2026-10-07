@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getTranslations } from "next-intl/server";
 import { buildExportResponse, parseExportFormat, selectColumns } from "@/lib/exportResponse";
 import { ORG_UNIT_EXPORT_COLUMNS, type OrgUnitExportColumn } from "@/lib/orgUnitExportColumns";
 import { createClient } from "@/lib/supabase/server";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 
 // Excluded from src/proxy.ts's matcher (which skips /api), so no locale or
 // session refresh runs here — createClient() still works because Route
@@ -16,12 +17,16 @@ import { createClient } from "@/lib/supabase/server";
 //
 // No extra permission gate: org_units_select is the boundary (a caller who
 // can see nothing gets an empty sheet), exactly as on the screen itself.
+/**
+ * Export gate = the permission that shows /org-units on screen (no gate of its own: org_units_select's RLS (employeeData / vacancies / orgStructure view) decides).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [];
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const { data } = await supabase
     .from("org_units")
