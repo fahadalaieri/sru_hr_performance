@@ -1,9 +1,18 @@
 "use server";
 
 import { z } from "zod";
+import { createHash } from "node:crypto";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { checkRateLimit } from "@/lib/rate-limit";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { canWriteThreeSixtyResponses, type BehavioralLevel, type ThreeSixtyAssignmentStatus } from "@/lib/threeSixty";
+import {
+  canWriteThreeSixtyResponses,
+  type BehavioralLevel,
+  type ThreeSixtyAssignmentStatus,
+  type ThreeSixtyCycleStatus,
+} from "@/lib/threeSixty";
+import { evaluateExternalLinkAccess } from "@/lib/threeSixtyExternalLink";
 import { validateThreeSixtyResponseWrite } from "@/lib/threeSixtyResponseValidation";
 import { resolveApplicableThreeSixtyItems } from "@/lib/threeSixtyAssignmentItems";
 
@@ -63,14 +72,38 @@ async function applicableItemsForAssignment(
   );
 }
 
+/**
+ * Resolves the token to an assignment the public path may act on: an
+ * EXTERNAL rater's assignment whose cycle is still active (see
+ * `evaluateExternalLinkAccess` for why internal tokens and closed cycles are
+ * refused). Returns null for anything else, so every caller fails closed.
+ */
 async function resolveAssignmentByToken(admin: ReturnType<typeof createAdminClient>, token: string) {
   const { data } = await admin
     .from("three_sixty_assignments")
-    .select("id, subject_employee_id, relationship_code, status")
+    .select("id, subject_employee_id, relationship_code, status, rater_employee_id, external_rater_email, three_sixty_cycles(status)")
     .eq("access_token", token)
     .is("deleted_at", null)
     .maybeSingle();
-  return data;
+  if (!data) return null;
+  const cycle = data.three_sixty_cycles as unknown as { status: ThreeSixtyCycleStatus } | null;
+  const access = evaluateExternalLinkAccess({
+    raterEmployeeId: data.rater_employee_id,
+    externalRaterEmail: data.external_rater_email,
+    status: data.status as ThreeSixtyAssignmentStatus,
+    cycleStatus: cycle?.status ?? "closed",
+  });
+  return access.ok ? data : null;
+}
+
+/** Best-effort client IP for rate limiting -- same `x-forwarded-for` trust boundary `login` already accepts. */
+async function clientIp(): Promise<string> {
+  return (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+}
+
+/** The bearer token never goes into a bucket key verbatim; a short digest is enough to key a counter. */
+function tokenBucket(token: string): string {
+  return createHash("sha256").update(token).digest("hex").slice(0, 16);
 }
 
 export async function saveThreeSixtyExternalResponse(input: {
@@ -83,6 +116,16 @@ export async function saveThreeSixtyExternalResponse(input: {
   const parsed = saveSchema.safeParse(input);
   if (!parsed.success) return { ok: false, message: "invalid_input" };
   const { token, itemId, optionId, numericValue, textValue } = parsed.data;
+
+  // Autosave fires once per answer change, so a real rater needs a few dozen
+  // calls per survey; these caps only stop a script hammering a leaked link.
+  // Fails open on an RPC error, same posture as `login` (RLS/token stay the
+  // real boundary).
+  const [tokenOk, ipOk] = await Promise.all([
+    checkRateLimit(`three_sixty_external:save:token:${tokenBucket(token)}`, 300, 60 * 60),
+    checkRateLimit(`three_sixty_external:save:ip:${await clientIp()}`, 600, 60 * 60),
+  ]);
+  if (!tokenOk || !ipOk) return { ok: false, message: "unknown" };
 
   const admin = createAdminClient();
   const assignment = await resolveAssignmentByToken(admin, token);
@@ -154,6 +197,12 @@ export async function submitThreeSixtyExternalAssignment(
   const parsed = submitSchema.safeParse({ token: formData.get("token") });
   if (!parsed.success) return { status: "error", message: "invalid_input" };
   const { token } = parsed.data;
+
+  const [tokenOk, ipOk] = await Promise.all([
+    checkRateLimit(`three_sixty_external:submit:token:${tokenBucket(token)}`, 10, 60 * 60),
+    checkRateLimit(`three_sixty_external:submit:ip:${await clientIp()}`, 60, 60 * 60),
+  ]);
+  if (!tokenOk || !ipOk) return { status: "error", message: "unknown" };
 
   const admin = createAdminClient();
   const assignment = await resolveAssignmentByToken(admin, token);

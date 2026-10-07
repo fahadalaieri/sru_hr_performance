@@ -1858,6 +1858,8 @@
   "ThreeSixtyExternalPage": {
     "title": "360-Review Questionnaire",
     "errorInvalidLink": "This link is invalid or has expired. Contact whoever sent it to you for a new one.",
+    "errorLinkExpired": "This questionnaire's period has ended or has not started yet, so the link can no longer be used. Contact whoever sent it if you believe this is a mistake.",
+    "errorTooManyRequests": "Too many requests from your device in a short time. Wait a moment and open the link again.",
     "errorNoItems": "No items apply to this relationship."
   },
   "ThreeSixtyReportPage": {
