@@ -4,6 +4,7 @@ import ExcelJS from "exceljs";
 import { createClient } from "@/lib/supabase/server";
 import { applyMapping, parseImportOptions, updatesExisting, writesField } from "@/lib/excelImportOptions";
 import { threeSixtyTemplateColumnLabels, THREE_SIXTY_TEMPLATE_SHEETS } from "@/lib/threeSixtyTemplateExcel";
+import { cellNumber, cellText, headerMap, loadImportWorkbook } from "@/lib/excelImport";
 
 export type ImportThreeSixtyTemplateResult =
   | {
@@ -18,22 +19,6 @@ export type ImportThreeSixtyTemplateResult =
     }
   | { status: "error"; message: "invalid_input" | "unauthenticated" | "unknown" };
 
-function cellText(value: ExcelJS.CellValue): string | null {
-  if (value == null) return null;
-  if (typeof value === "object" && "text" in (value as object)) {
-    return String((value as { text: string }).text).trim() || null;
-  }
-  const text = String(value).trim();
-  return text === "" ? null : text;
-}
-
-function cellNumber(value: ExcelJS.CellValue): number | null {
-  const text = cellText(value);
-  if (text === null) return null;
-  const n = Number(text);
-  return Number.isFinite(n) ? n : null;
-}
-
 /** Accepts common truthy spellings (TRUE/true/1/نعم/صح) -- everything else is false. */
 function cellBool(value: ExcelJS.CellValue, fallback: boolean): boolean {
   const text = cellText(value);
@@ -47,15 +32,6 @@ const BEHAVIORAL_LEVELS = new Set(["basic", "practitioner", "advanced", "profess
 function cellBehavioralLevel(value: ExcelJS.CellValue): string | null {
   const text = cellText(value)?.trim().toLowerCase() ?? null;
   return text && BEHAVIORAL_LEVELS.has(text) ? text : null;
-}
-
-function headerMap(sheet: ExcelJS.Worksheet): Map<string, number> {
-  const map = new Map<string, number>();
-  sheet.getRow(1).eachCell((cell, colNumber) => {
-    const text = cellText(cell.value);
-    if (text) map.set(text, colNumber);
-  });
-  return map;
 }
 
 function findSheet(workbook: ExcelJS.Workbook, name: string): ExcelJS.Worksheet | undefined {
@@ -109,14 +85,12 @@ export async function importThreeSixtyTemplateExcel(
   const options = parseImportOptions(formData);
   const mayUpdate = updatesExisting(options);
 
-  let workbook: ExcelJS.Workbook;
-  try {
-    const buffer = await file.arrayBuffer();
-    workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
-  } catch {
-    return { status: "error", message: "invalid_input" };
-  }
+  // Size and row limits are enforced here, not only in the preview dialog
+  // (src/lib/excelImport.ts). A limit the import itself does not check is
+  // no limit, since this action can be called directly with any file.
+  const loaded = await loadImportWorkbook(file);
+  if (!loaded.ok) return { status: "error", message: "invalid_input" };
+  const workbook = loaded.workbook;
 
   const rowErrors: string[] = [];
   let raterGroupsWritten = 0;

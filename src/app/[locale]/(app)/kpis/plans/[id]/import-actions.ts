@@ -1,6 +1,5 @@
 "use server";
 
-import ExcelJS from "exceljs";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -17,6 +16,7 @@ import {
   STRATEGIC_PLAN_SHEETS,
   type StrategicPlanSheetKey,
 } from "@/lib/strategicPlanExcel";
+import { loadImportWorkbook } from "@/lib/excelImport";
 
 export type ImportStrategicPlanState =
   | {
@@ -99,13 +99,12 @@ export async function importStrategicPlanExcel(
   const { data: myProfile } = await supabase.from("profiles").select("id").eq("auth_user_id", user.id).maybeSingle();
   const myProfileId = (myProfile?.id as string | undefined) ?? null;
 
-  let workbook: ExcelJS.Workbook;
-  try {
-    workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(await file.arrayBuffer());
-  } catch {
-    return { status: "error", message: "invalid_input" };
-  }
+  // Size and row limits are enforced here, not only in the preview dialog
+  // (src/lib/excelImport.ts). A limit the import itself does not check is
+  // no limit, since this action can be called directly with any file.
+  const loaded = await loadImportWorkbook(file);
+  if (!loaded.ok) return { status: "error", message: "invalid_input" };
+  const workbook = loaded.workbook;
 
   const options = parseImportOptions(formData);
   // "Add new only" is the default: every sheet below creates what is missing

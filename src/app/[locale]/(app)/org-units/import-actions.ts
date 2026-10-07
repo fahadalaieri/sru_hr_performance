@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ORG_UNIT_IMPORT_COLUMNS } from "@/lib/importColumns";
 import { applyMapping, parseImportOptions, updatesExisting, writesField } from "@/lib/excelImportOptions";
 import { foldArabicHamza } from "@/lib/arabicSearch";
+import { headerMap, loadImportWorkbook } from "@/lib/excelImport";
 
 export type OrgUnitsImportResult =
   | {
@@ -42,16 +43,6 @@ function classificationResolver(rows: Array<{ id: string; code: string; name_ar:
   };
 }
 
-function headerMap(sheet: ExcelJS.Worksheet): Map<string, number> {
-  const map = new Map<string, number>();
-  const header = sheet.getRow(1);
-  header.eachCell((cell, index) => {
-    const text = String(cell.value ?? "").trim();
-    if (text !== "") map.set(text, index);
-  });
-  return map;
-}
-
 /**
  * Imports organisational units from a workbook.
  *
@@ -84,12 +75,12 @@ export async function importOrgUnitsExcel(
   } = await supabase.auth.getUser();
   if (!user) return { status: "error", message: "unauthenticated" };
 
-  const workbook = new ExcelJS.Workbook();
-  try {
-    await workbook.xlsx.load(await file.arrayBuffer());
-  } catch {
-    return { status: "error", message: "invalid_input" };
-  }
+  // Size and row limits are enforced here, not only in the preview dialog
+  // (src/lib/excelImport.ts). A limit the import itself does not check is
+  // no limit, since this action can be called directly with any file.
+  const loaded = await loadImportWorkbook(file);
+  if (!loaded.ok) return { status: "error", message: "invalid_input" };
+  const workbook = loaded.workbook;
 
   const sheet = workbook.worksheets[0];
   if (!sheet) return { status: "error", message: "invalid_input" };

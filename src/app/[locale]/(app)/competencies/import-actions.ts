@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { COMPETENCY_IMPORT_COLUMNS } from "@/lib/importColumns";
 import { applyMapping, parseImportOptions, updatesExisting, writesField } from "@/lib/excelImportOptions";
 import { behavioralLevelOrder, type BehavioralLevel } from "@/lib/competencyFramework";
+import { cellText, headerMap, loadImportWorkbook } from "@/lib/excelImport";
 
 export type CompetenciesImportResult =
   | {
@@ -17,24 +18,6 @@ export type CompetenciesImportResult =
       };
     }
   | { status: "error"; message: "invalid_input" | "unauthenticated" | "unknown" };
-
-function cellText(value: ExcelJS.CellValue): string | null {
-  if (value == null) return null;
-  if (typeof value === "object" && "text" in (value as object)) {
-    return String((value as { text: string }).text).trim() || null;
-  }
-  const text = String(value).trim();
-  return text === "" ? null : text;
-}
-
-function headerMap(sheet: ExcelJS.Worksheet): Map<string, number> {
-  const map = new Map<string, number>();
-  sheet.getRow(1).eachCell((cell, colNumber) => {
-    const text = cellText(cell.value);
-    if (text) map.set(text, colNumber);
-  });
-  return map;
-}
 
 function requireColumns(map: Map<string, number>, names: string[]): string | null {
   for (const name of names) {
@@ -93,14 +76,12 @@ export async function importCompetenciesExcel(
     return { status: "error", message: "unauthenticated" };
   }
 
-  let workbook: ExcelJS.Workbook;
-  try {
-    const buffer = await file.arrayBuffer();
-    workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
-  } catch {
-    return { status: "error", message: "invalid_input" };
-  }
+  // Size and row limits are enforced here, not only in the preview dialog
+  // (src/lib/excelImport.ts). A limit the import itself does not check is
+  // no limit, since this action can be called directly with any file.
+  const loaded = await loadImportWorkbook(file);
+  if (!loaded.ok) return { status: "error", message: "invalid_input" };
+  const workbook = loaded.workbook;
 
   const sheet =
     workbook.worksheets.find((w) => w.name.trim() === "إطار الجدارات") ??
