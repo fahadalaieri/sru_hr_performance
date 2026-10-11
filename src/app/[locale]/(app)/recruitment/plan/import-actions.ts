@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { PLAN_ITEM_IMPORT_COLUMNS } from "@/lib/importColumns";
 import { recruitmentPriorities, recruitmentPriorityLabels } from "@/lib/recruitmentPlan";
 import { applyMapping, parseImportOptions, updatesExisting, writesField } from "@/lib/excelImportOptions";
+import { cellNumber, cellText, headerMap, loadImportWorkbook } from "@/lib/excelImport";
 
 export type PlanItemsImportResult =
   | {
@@ -14,32 +15,7 @@ export type PlanItemsImportResult =
     }
   | { status: "error"; message: "invalid_input" | "unauthenticated" | "not_found" | "forbidden" | "unknown" };
 
-function cellText(value: ExcelJS.CellValue): string | null {
-  if (value == null) return null;
-  if (typeof value === "object" && "text" in (value as object)) {
-    return String((value as { text: string }).text).trim() || null;
-  }
-  const text = String(value).trim();
-  return text === "" ? null : text;
-}
-
 /** رقم من خلية قد تصل نصًّا («٣» أو "3" أو 3). القيمة غير الرقمية تُردّ null. */
-function cellNumber(value: ExcelJS.CellValue): number | null {
-  const text = cellText(value);
-  if (text == null) return null;
-  const normalized = text.replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d))).replace(/,/g, "");
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function headerMap(sheet: ExcelJS.Worksheet): Map<string, number> {
-  const map = new Map<string, number>();
-  sheet.getRow(1).eachCell((cell, colNumber) => {
-    const text = cellText(cell.value);
-    if (text) map.set(text, colNumber);
-  });
-  return map;
-}
 
 const C = PLAN_ITEM_IMPORT_COLUMNS;
 
@@ -117,14 +93,12 @@ export async function importPlanItemsExcel(
   // فإضافة بنود إليها بعد ذلك تغيّر ما اعتُمد دون أن يمرّ بأحد.
   if (plan.status !== "draft") return { status: "error", message: "forbidden" };
 
-  let workbook: ExcelJS.Workbook;
-  try {
-    const buffer = await file.arrayBuffer();
-    workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
-  } catch {
-    return { status: "error", message: "invalid_input" };
-  }
+  // Size and row limits are enforced here, not only in the preview dialog
+  // (src/lib/excelImport.ts). A limit the import itself does not check is
+  // no limit, since this action can be called directly with any file.
+  const loaded = await loadImportWorkbook(file);
+  if (!loaded.ok) return { status: "error", message: "invalid_input" };
+  const workbook = loaded.workbook;
 
   const sheet =
     workbook.worksheets.find((w) => w.name.trim() === "بنود الخطة") ??

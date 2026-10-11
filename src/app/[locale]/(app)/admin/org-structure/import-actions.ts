@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ORG_STRUCTURE_IMPORT_COLUMNS } from "@/lib/importColumns";
 import { applyMapping, parseImportOptions, updatesExisting, writesField } from "@/lib/excelImportOptions";
+import { cellText, headerMap, loadImportWorkbook } from "@/lib/excelImport";
 
 export type ImportResult =
   | {
@@ -33,16 +34,6 @@ export type ImportResult =
 const KNOWN_PARENT_CODE_CORRECTIONS: Record<string, string> = {
   "1132": "1131",
 };
-
-function cellText(value: ExcelJS.CellValue): string | null {
-  if (value == null) return null;
-  if (typeof value === "object" && "text" in (value as object)) {
-    // Rich text cells
-    return String((value as { text: string }).text).trim() || null;
-  }
-  const text = String(value).trim();
-  return text === "" ? null : text;
-}
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -81,15 +72,6 @@ function parseDateCell(value: ExcelJS.CellValue): string | null {
     if (month) return `${m[3]}-${pad2(month)}-${pad2(parseInt(m[1], 10))}`;
   }
   return null;
-}
-
-function headerMap(sheet: ExcelJS.Worksheet): Map<string, number> {
-  const map = new Map<string, number>();
-  sheet.getRow(1).eachCell((cell, colNumber) => {
-    const text = cellText(cell.value);
-    if (text) map.set(text, colNumber);
-  });
-  return map;
 }
 
 function requireColumns(map: Map<string, number>, names: string[]): string | null {
@@ -136,14 +118,12 @@ export async function importOrgStructureExcel(
     return { status: "error", message: "unauthenticated" };
   }
 
-  let workbook: ExcelJS.Workbook;
-  try {
-    const buffer = await file.arrayBuffer();
-    workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
-  } catch {
-    return { status: "error", message: "invalid_input" };
-  }
+  // Size and row limits are enforced here, not only in the preview dialog
+  // (src/lib/excelImport.ts). A limit the import itself does not check is
+  // no limit, since this action can be called directly with any file.
+  const loaded = await loadImportWorkbook(file);
+  if (!loaded.ok) return { status: "error", message: "invalid_input" };
+  const workbook = loaded.workbook;
 
   const employeesSheet =
     workbook.worksheets.find((w) => w.name.trim() === "Employees Data") ??
