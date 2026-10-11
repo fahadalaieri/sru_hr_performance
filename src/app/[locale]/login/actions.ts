@@ -36,9 +36,14 @@ export type LoginState = { error: "invalid_input" | "invalid_credentials" | "rat
  * 2026-07-25: "اضف اسم المستخدم واجعله خيارا عند الدخول اما الايميل او اسم
  * المستخدم" — the single `identifier` field accepts either. Supabase Auth
  * itself only ever authenticates by email, so `resolve_login_identifier()`
- * (a SECURITY DEFINER RPC granted to anon, since this runs pre-auth)
  * resolves a username to its real email first; an already-email-shaped
- * identifier passes through unchanged. Resolution failure (no such
+ * identifier passes through unchanged. Since 20261007000001 that RPC is
+ * callable by service_role ONLY: while it was granted to anon, any visitor
+ * could call it straight through PostgREST with the public anon key and
+ * enumerate usernames / read their emails, bypassing the rate limit that
+ * lives in THIS action, not in the function. Calling it through the admin
+ * client here keeps username login working and closes that public path.
+ * Resolution failure (no such
  * username) falls through to the exact same generic "invalid_credentials"
  * response signInWithPassword itself would give for a wrong password —
  * this reveals nothing about whether the identifier exists that a normal
@@ -70,8 +75,11 @@ export async function login(
   }
 
   const supabase = await createClient();
+  const admin = createAdminClient();
 
-  const { data: resolvedEmail } = await supabase.rpc("resolve_login_identifier", {
+  // Service-role call (see the header comment): runs only after the rate
+  // limit above has passed, and the result never leaves this action.
+  const { data: resolvedEmail } = await admin.rpc("resolve_login_identifier", {
     p_identifier: parsed.data.identifier,
   });
 
@@ -95,7 +103,6 @@ export async function login(
   // legitimate login, so its result is deliberately not checked here. Logged
   // unconditionally, before the must_change_password branch below — a login
   // is a login regardless of what happens right after it.
-  const admin = createAdminClient();
   await admin.from("audit_log").insert({ actor_id: signInData.user.id, action: "login", entity: "auth" });
 
   // 2026-07-25: accounts created directly (no invite email — see
