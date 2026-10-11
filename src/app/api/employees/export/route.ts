@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 import {
   DEFAULT_EMPLOYEE_EXPORT_COLUMNS,
   isEmployeeExportColumn,
@@ -16,6 +17,12 @@ import {
 // page itself uses rather than accepting any row data from the client —
 // an export must reflect exactly what this caller is currently authorized
 // to see, not whatever happened to be rendered in their browser.
+/**
+ * Export gate = the permission that shows /employees on screen (no permission gate of its own: profiles_select's RLS decides (self row, subordinates, employeeData scope)).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [];
+
 export async function GET(request: NextRequest) {
   const format = request.nextUrl.searchParams.get("format");
   if (format !== "csv" && format !== "xlsx") {
@@ -35,12 +42,8 @@ export async function GET(request: NextRequest) {
   const columns = requestedColumns.length > 0 ? requestedColumns : DEFAULT_EMPLOYEE_EXPORT_COLUMNS;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const { data } = await supabase
     .from("profiles")

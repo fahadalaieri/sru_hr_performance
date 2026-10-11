@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { computeRecruitmentPlanTotals } from "@/lib/recruitmentPlan";
 import { planStatusLabelFor } from "@/lib/recruitmentWorkflow";
 import { contractTypeLabel, quarterLabel } from "@/lib/recruitmentPlanAnalytics";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 
 // Excluded from src/proxy.ts's matcher (which skips /api entirely), so no
 // locale/session refresh runs here — createClient() still works because Route
@@ -42,6 +43,15 @@ const priorityLabels: Record<string, string> = {
   low: "منخفضة",
 };
 
+/**
+ * Export gate = the permission that shows /recruitment/plan/[id] on screen (the page's own canView: plan viewers, or finance reviewing the budget).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [
+  { area: "recruitmentPlan", minLevel: "view" },
+  { area: "recruitmentBudget", minLevel: "recommend" },
+];
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -53,10 +63,8 @@ export async function GET(
   }
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const { data: plan } = await supabase
     .from("recruitment_plans")

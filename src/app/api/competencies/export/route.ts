@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getTranslations } from "next-intl/server";
 import { buildExportResponse, parseExportFormat, selectColumns } from "@/lib/exportResponse";
 import { COMPETENCY_EXPORT_COLUMNS, type CompetencyExportColumn } from "@/lib/competencyExportColumns";
 import { createClient } from "@/lib/supabase/server";
-import { hasVpraAccess, type ProcessArea, type VpraLevel } from "@/lib/vpra";
 import { behavioralLevelOrder } from "@/lib/competencyFramework";
 import { behavioralLevelLabels } from "@/lib/data/competencies";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 
 // Excluded from src/proxy.ts's matcher (which skips /api entirely) -- no
 // locale/session-refresh happens automatically here; createClient() still
@@ -16,25 +16,16 @@ import { behavioralLevelLabels } from "@/lib/data/competencies";
 // nothing about which pillars/domains/competencies exist is trusted from the
 // client. One row per competency (the tree flattened), the same shape every
 // other export in this app already uses.
+/**
+ * Export gate = the permission that shows /competencies on screen (same gate the page uses).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [{ area: "competencyFramework", minLevel: "view" }];
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
-
-  const { data: permissionRows } = await supabase.rpc("get_my_permissions");
-  const competencyFrameworkLevel =
-    ((permissionRows ?? []) as { process_area: ProcessArea; vpra_level: VpraLevel }[]).find(
-      (row) => row.process_area === "competencyFramework"
-    )?.vpra_level ?? "none";
-  // Same gate as the page itself -- RLS would return nothing anyway, this
-  // just answers with a clear 403 instead of an empty spreadsheet.
-  if (!hasVpraAccess(competencyFrameworkLevel, "view")) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const [
     { data: pillarsData },

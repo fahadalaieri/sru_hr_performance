@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { buildExportResponse, parseExportFormat, selectColumns } from "@/lib/exportResponse";
 import { STAFFING_EXPORT_COLUMNS, type StaffingExportColumn } from "@/lib/staffingExportColumns";
 import { getTranslations } from "next-intl/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildDescendantOrgUnitIdsResolver } from "@/lib/orgUnitHierarchy";
 import { buildEmployeeLevelOrderResolver, isBelowOrUnknownLevel } from "@/lib/orgStructureEmployeeLevel";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 
 // Excluded from src/proxy.ts's matcher (which skips /api), same shape as
 // every other export route. Rows are re-fetched through the caller's own
@@ -17,14 +18,19 @@ import { buildEmployeeLevelOrderResolver, isBelowOrUnknownLevel } from "@/lib/or
 // resolvers the screen itself renders from (buildDescendantOrgUnitIdsResolver,
 // buildEmployeeLevelOrderResolver/isBelowOrUnknownLevel) so the exported
 // file can't drift from what the table shows.
+/**
+ * Export gate = the permission that shows /admin/org-structure/staffing on screen (same pair org_structure_assignments_select accepts (20260725000004)).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [
+  { area: "orgStructure", minLevel: "view" },
+  { area: "staffing", minLevel: "view" },
+];
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const { data: levelsData } = await supabase
     .from("org_structure_levels")

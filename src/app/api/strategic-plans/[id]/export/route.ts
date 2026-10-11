@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { STRATEGIC_PLAN_COLUMNS, STRATEGIC_PLAN_SHEETS } from "@/lib/strategicPlanExcel";
 import { buildExportResponse, parseExportFormat } from "@/lib/exportResponse";
+import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 
 // Excluded from src/proxy.ts's matcher (which skips /api entirely), so no
 // locale/session-refresh happens here — createClient() still works because
@@ -15,16 +16,18 @@ import { buildExportResponse, parseExportFormat } from "@/lib/exportResponse";
 // the browser: the workbook reflects exactly what this caller is authorized
 // to see right now. A caller who can read nothing gets a valid workbook
 // with headers and no rows, not an error.
+/**
+ * Export gate = the permission that shows /kpis/plans/[id] on screen (deliberately ungated page (20260801000001); nested goal/KPI tables keep their own RLS).
+ * See requireExportAccess for the product rule this encodes.
+ */
+const EXPORT_GATE: ExportGate = [];
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
-  }
+  const access = await requireExportAccess(supabase, EXPORT_GATE);
+  if (!access.ok) return access.response;
 
   const { data: plan } = await supabase
     .from("strategic_plans")
