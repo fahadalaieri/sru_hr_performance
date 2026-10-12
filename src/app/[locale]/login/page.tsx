@@ -58,6 +58,20 @@ export default async function LoginPage({
 
           <LoginForm locale={locale} />
 
+          {/* University SSO (2026-10-12): shown only once this platform is
+              registered with the SSO operator — a button that can never
+              succeed is worse than none. The hand-off lives on /login/sso. */}
+          {process.env.NEXT_PUBLIC_SRU_SSO_APP_KEY && (
+            <div className="sru-auth-sso">
+              <p className="sru-auth-sso-divider"><span>{t("ssoDivider")}</span></p>
+              <Link href="/login/sso" className="sru-btn sru-auth-sso-btn">
+                <Globe size={16} aria-hidden />
+                {t("ssoButton")}
+              </Link>
+              <p className="sru-auth-split-note">{t("ssoHint")}</p>
+            </div>
+          )}
+
           <p className="sru-auth-split-note">{t("inviteNote")}</p>
         </div>
       </section>

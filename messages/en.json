@@ -118,9 +118,31 @@
     "welcomeTitle": "Welcome",
     "welcomeLead": "Sign in to continue to your workspace at Sulaiman Alrajhi University.",
     "inviteNote": "Access is by invitation only. If you do not have an account, contact Human Capital.",
+    "ssoDivider": "or",
+    "ssoButton": "Sign in with your university account",
+    "ssoHint": "Staff: sign in with your university email through the unified sign-on, with no separate password for this platform.",
     "programName": "Performance Management Program",
     "logoAlt": "Sulaiman Alrajhi University logo",
     "switchLanguage": "Switch to {language}"
+  },
+  "SsoPage": {
+    "title": "Sign in with your university account",
+    "loading": "Loading the unified sign-on service…",
+    "gate": "Complete the sign-in with your university account in the window shown.",
+    "exchanging": "Identity verified, opening your session on this platform…",
+    "backToLogin": "Back to password sign-in",
+    "errors": {
+      "sso_disabled": "Unified sign-on is not enabled on this platform yet. Sign in with your password or contact the Digital Transformation Department.",
+      "invalid_assertion": "The sign-in assertion could not be verified. Please start again.",
+      "replayed": "This sign-in assertion was already used. Please start again.",
+      "no_profile": "Your university account is valid, but there is no employee profile for you on this platform. Contact Human Capital to have your profile added.",
+      "inactive": "Your profile on this platform is inactive or not yet approved. Contact Human Capital.",
+      "rate_limited": "Too many attempts in a short time. Wait a moment and try again.",
+      "no_assertion": "The unified sign-on did not issue an assertion for this platform. Its assertion secret is probably not set up yet; contact the Digital Transformation Department.",
+      "denied": "You do not have access to this platform through the unified sign-on.",
+      "library": "The unified sign-on service could not be loaded. Check your connection and try again.",
+      "unknown": "An unexpected error occurred during sign-in. Try again, and contact support if it persists."
+    }
   },
   "ForgotPasswordPage": {
     "title": "Forgot Password",

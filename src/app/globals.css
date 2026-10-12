@@ -3113,3 +3113,9 @@ table {
 .sru-rating-bar-fill.is-needsImprovement {
   background: var(--sru-danger, #b91c1c);
 }
+
+/* University SSO entry on the login screen (2026-10-12) — additive, kit untouched. */
+.sru-auth-sso { margin-top: 18px; display: grid; gap: 10px; }
+.sru-auth-sso-divider { display: flex; align-items: center; gap: 10px; color: var(--sru-muted); font-size: 12px; margin: 0; }
+.sru-auth-sso-divider::before, .sru-auth-sso-divider::after { content: ""; flex: 1; height: 1px; background: var(--sru-border); }
+.sru-auth-sso-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
