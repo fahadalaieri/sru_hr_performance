@@ -53,10 +53,15 @@ describe.skipIf(!hasDatabase)("three_sixty_responses: RLS lock, validation trigg
     });
   });
 
-  it("RLS refuses an insert once the assignment is submitted", async () => {
+  it("an insert once the assignment is submitted is refused", async () => {
     await inTransaction(async (asg) => {
       await asUser(c, rater.authUserId);
-      await expect(c.query("INSERT INTO three_sixty_responses(assignment_id,item_id,option_id) VALUES ($1,$2,$3)", [asg, ratingItemId, goodOption.id])).rejects.toMatchObject({ code: "42501" });
+      // Two independent layers refuse this: the BEFORE trigger from
+      // 20261012000001 (23514, fires first) and the RLS policy from
+      // 20261006000001 (42501, would fire if the trigger were dropped).
+      // Either code proves the lock; which one surfaces is an ordering detail.
+      await expect(c.query("INSERT INTO three_sixty_responses(assignment_id,item_id,option_id) VALUES ($1,$2,$3)", [asg, ratingItemId, goodOption.id]))
+        .rejects.toSatisfy((e: unknown) => ["23514", "42501"].includes((e as { code?: string }).code ?? ""));
     }, "submitted");
   });
 

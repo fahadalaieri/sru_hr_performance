@@ -14,10 +14,10 @@ const gates: Record<string, Array<[string, string]>> = {
   "org-units/export": [],
   "promotions/export": [],
   "strategic-plans/00000000-0000-4000-8000-000000000000/export": [],
-  "org-structure/staffing/export": [["orgStructure", "view"], ["staffing", "view"]],
+  "org-structure/staffing/export": [],
   "three-sixty/template/export": [["threeSixty", "prepare"]],
   "recruitment/plan/00000000-0000-4000-8000-000000000000/export": [["recruitmentPlan", "view"], ["recruitmentBudget", "recommend"]],
-  "competencies/export": [["competencyFramework", "view"]],
+  "competencies/export": [],
   "recruitment/requests/export": [["recruitmentRequests", "view"], ["recruitmentBudget", "view"]],
 };
 const rank: Record<string, number> = { none: 0, view: 1, prepare: 2, recommend: 3, approve: 4 };

@@ -19,13 +19,15 @@ import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 // buildEmployeeLevelOrderResolver/isBelowOrUnknownLevel) so the exported
 // file can't drift from what the table shows.
 /**
- * Export gate = the permission that shows /admin/org-structure/staffing on screen (same pair org_structure_assignments_select accepts (20260725000004)).
- * See requireExportAccess for the product rule this encodes.
+ * Export gate = the permission that shows /admin/org-structure/staffing on
+ * screen. The page has no gate of its own: org_structure_positions_select
+ * (orgStructure>=view) and org_structure_assignments_select (orgStructure or
+ * staffing >= view, or the employee's own row) decide what it renders — so,
+ * per the product rule in requireExportAccess, RLS alone decides here too.
+ * An extra orgStructure/staffing gate was added 2026-10-07 and removed
+ * 2026-10-12 after independent review: it was not the page's gate.
  */
-const EXPORT_GATE: ExportGate = [
-  { area: "orgStructure", minLevel: "view" },
-  { area: "staffing", minLevel: "view" },
-];
+const EXPORT_GATE: ExportGate = [];
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();

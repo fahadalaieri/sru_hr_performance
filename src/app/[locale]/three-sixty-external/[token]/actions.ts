@@ -103,7 +103,9 @@ async function clientIp(): Promise<string> {
 
 /** The bearer token never goes into a bucket key verbatim; a short digest is enough to key a counter. */
 function tokenBucket(token: string): string {
-  return createHash("sha256").update(token).digest("hex").slice(0, 16);
+  // Zod accepts a UUID in either letter case and Postgres compares them equal,
+  // so the counter must not split by spelling: normalise before hashing.
+  return createHash("sha256").update(token.toLowerCase()).digest("hex").slice(0, 16);
 }
 
 export async function saveThreeSixtyExternalResponse(input: {

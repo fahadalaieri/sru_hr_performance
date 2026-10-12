@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ORG_UNIT_IMPORT_COLUMNS } from "@/lib/importColumns";
 import { applyMapping, parseImportOptions, updatesExisting, writesField } from "@/lib/excelImportOptions";
 import { foldArabicHamza } from "@/lib/arabicSearch";
-import { headerMap, loadImportWorkbook } from "@/lib/excelImport";
+import { cellText, headerMap, loadImportWorkbook } from "@/lib/excelImport";
 
 export type OrgUnitsImportResult =
   | {
@@ -101,8 +101,9 @@ export async function importOrgUnitsExcel(
     unitCode: string;
   };
 
-  const text = (row: ExcelJS.Row, column: number | undefined) =>
-    column == null ? "" : String(row.getCell(column).value ?? "").trim();
+  // Same reader as the header row: rich text, formula results and hyperlinks
+  // yield their text instead of "[object Object]".
+  const text = (row: ExcelJS.Row, column: number | undefined) => (column == null ? "" : (cellText(row.getCell(column).value) ?? ""));
 
   const [{ data: kindRows }, { data: typeRows }, { data: levelRows }] = await Promise.all([
     supabase.from("org_unit_kinds").select("id, code, name_ar, name_en").is("deleted_at", null),

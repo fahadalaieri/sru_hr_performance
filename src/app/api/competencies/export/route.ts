@@ -17,10 +17,15 @@ import { requireExportAccess, type ExportGate } from "@/lib/exportAuth";
 // client. One row per competency (the tree flattened), the same shape every
 // other export in this app already uses.
 /**
- * Export gate = the permission that shows /competencies on screen (same gate the page uses).
- * See requireExportAccess for the product rule this encodes.
+ * Export gate = the permission that shows /competencies on screen. The page
+ * has no read gate of its own (competencyFramework only unlocks MANAGING the
+ * framework), and competencies_select also admits recruitmentPlan /
+ * recruitmentRequests viewers (20260807000010) — so, per the product rule in
+ * requireExportAccess, RLS alone decides here. The earlier
+ * competencyFramework>=view check (pre-2026-10) refused callers the page
+ * itself was showing data to; removed 2026-10-12 after independent review.
  */
-const EXPORT_GATE: ExportGate = [{ area: "competencyFramework", minLevel: "view" }];
+const EXPORT_GATE: ExportGate = [];
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
