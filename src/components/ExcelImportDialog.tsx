@@ -61,6 +61,7 @@ export function ExcelImportDialog({
   pendingLabel,
   extraFields,
   triggerVariant = "secondary",
+  previewLabel,
   children,
 }: {
   triggerLabel: string;
@@ -75,6 +76,12 @@ export function ExcelImportDialog({
   pendingLabel: string;
   /** Hidden values the importer needs (a plan id, say). */
   extraFields?: Record<string, string>;
+  /**
+   * When set, a second button submits the same form with `dryRun=1`: the
+   * importer computes its report without writing anything (2026-10-15, staff
+   * bulk onboarding). Only importers that honour `dryRun` should pass it.
+   */
+  previewLabel?: string;
   /** "primary" fills the trigger with the same purple as the page's other header actions (e.g. "+ إضافة ..."), so the import button doesn't read as a lesser, outline-only action beside them. Defaults to "secondary" (outline) so every existing caller is unaffected. */
   triggerVariant?: "primary" | "secondary";
   /** Renders the importer's own result. */
@@ -131,6 +138,18 @@ export function ExcelImportDialog({
   useEffect(() => {
     if (importState?.status === "success" && fileInputRef.current) fileInputRef.current.value = "";
   }, [importState]);
+
+  /** Step-2 submit: the real import, or the same request flagged as a preview. */
+  function submitMapped(dryRun: boolean) {
+    const formData = new FormData();
+    if (file) formData.set("file", file);
+    formData.set("importMode", mode);
+    formData.set("importMapping", JSON.stringify(mapping));
+    formData.set("importFields", JSON.stringify([...selected]));
+    for (const [k, v] of Object.entries(extraFields ?? {})) formData.set(k, v);
+    if (dryRun) formData.set("dryRun", "1");
+    startTransition(() => importAction(formData));
+  }
 
   function toggleField(key: string) {
     setSelected((prev) => {
@@ -296,13 +315,7 @@ export function ExcelImportDialog({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              const formData = new FormData();
-              if (file) formData.set("file", file);
-              formData.set("importMode", mode);
-              formData.set("importMapping", JSON.stringify(mapping));
-              formData.set("importFields", JSON.stringify([...selected]));
-              for (const [k, v] of Object.entries(extraFields ?? {})) formData.set(k, v);
-              startTransition(() => importAction(formData));
+              submitMapped(false);
             }}
             style={{ marginTop: 14 }}
           >
@@ -422,11 +435,16 @@ export function ExcelImportDialog({
 
             {children?.(importState)}
 
-            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
               <button type="submit" className="sru-btn sru-btn-primary" disabled={importing}>
                 <ArrowDownToLine size={14} aria-hidden style={{ marginInlineEnd: 6 }} />
                 {importing ? pendingLabel : t("runImport")}
               </button>
+              {previewLabel && (
+                <button type="button" className="sru-btn" disabled={importing} onClick={() => submitMapped(true)}>
+                  {previewLabel}
+                </button>
+              )}
               <button type="button" className="sru-btn" onClick={() => setStep(1)}>
                 {t("back")}
               </button>
