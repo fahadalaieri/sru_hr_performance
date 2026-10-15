@@ -105,6 +105,7 @@ export const ORG_STRUCTURE_IMPORT_COLUMNS = {
   employeeCategory: "Category",
   insuranceCategory: "Insurance Category",
   role: "الدور في النظام",
+  supervisorNumber: "الرقم الوظيفي للرئيس المباشر",
   structLevel: "المستوى",
   structCode: "الرمز",
   structUnit: "الوحدة التنظيمية",

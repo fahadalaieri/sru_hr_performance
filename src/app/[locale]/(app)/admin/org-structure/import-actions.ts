@@ -4,8 +4,9 @@ import ExcelJS from "exceljs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ORG_STRUCTURE_IMPORT_COLUMNS } from "@/lib/importColumns";
-import { applyMapping, parseImportOptions, updatesExisting, writesField } from "@/lib/excelImportOptions";
+import { applyMapping, parseImportOptions } from "@/lib/excelImportOptions";
 import { cellText, headerMap, loadImportWorkbook } from "@/lib/excelImport";
+import { importStaffRows, type StaffImportRow, type StaffImportSummary } from "@/lib/staffImport";
 
 export type ImportResult =
   | {
@@ -22,6 +23,14 @@ export type ImportResult =
         assignmentErrors: string[];
         unmatchedOrgUnits: string[];
         corrections: string[];
+        /** 2026-10-15 staff bulk onboarding — see src/lib/staffImport.ts. */
+        supervisorsLinked: number;
+        unknownSupervisors: string[];
+        approvedCreated: number;
+        pendingCreated: number;
+        withoutEmail: number;
+        /** True when the caller asked for a preview: nothing was written, no audit row. */
+        dryRun: boolean;
       };
     }
   | { status: "error"; message: "invalid_input" | "unauthenticated" | "forbidden" | "unknown" };
@@ -172,58 +181,19 @@ export async function importOrgStructureExcel(
     }
   }
 
-  const employeeErrors: string[] = [];
-  const roleErrors: string[] = [];
   const positionErrors: string[] = [];
   const assignmentErrors: string[] = [];
   const corrections: string[] = [];
-  const unmatchedOrgUnitsSet = new Set<string>();
 
   // ---------------------------------------------------------------------
-  // 1. Org units — fetch once for department-name matching (exact match on
-  //    trimmed name_ar only, per the project owner's "حاول المطابقة
-  //    ونصلحها فيما بعد" — best-effort now, manual correction later, not a
-  //    fuzzy/approximate matcher that could silently mismatch).
+  // 1. Parse "Employees Data" rows. Everything that used to follow here —
+  //    org-unit matching, job titles, the profiles upsert and the role
+  //    column — lives in src/lib/staffImport.ts since 2026-10-15, together
+  //    with the supervisor pass, the explicit approval status, the title
+  //    hint, the derived roles and the dry run.
   // ---------------------------------------------------------------------
-  const { data: orgUnitsData } = await supabase.from("org_units").select("id, name_ar").is("deleted_at", null);
-  const orgUnitByName = new Map((orgUnitsData ?? []).map((u) => [u.name_ar.trim(), u.id]));
-
-  // ---------------------------------------------------------------------
-  // 2. job_families — reuse the existing placeholder families rather than
-  //    inventing new ones (established precedent from the 2026-07-20
-  //    job_titles data import): "Academic" -> "الأكاديمي", everything else
-  //    -> "عام".
-  // ---------------------------------------------------------------------
-  const { data: familiesData } = await supabase.from("job_families").select("id, name_ar");
-  const academicFamilyId = familiesData?.find((f) => f.name_ar === "الأكاديمي")?.id ?? null;
-  const generalFamilyId = familiesData?.find((f) => f.name_ar === "عام")?.id ?? null;
-
-  // ---------------------------------------------------------------------
-  // 3. Parse "Employees Data" rows.
-  // ---------------------------------------------------------------------
-  interface EmployeeRow {
-    employeeNumber: string;
-    fullNameAr: string;
-    fullNameEn: string | null;
-    email: string | null;
-    hireDate: string | null;
-    qualification: string | null;
-    educationSpeciality: string | null;
-    dateOfBirth: string | null;
-    mobile: string | null;
-    maritalStatus: string | null;
-    gender: string | null;
-    nationality: string | null;
-    departmentAr: string | null;
-    positionAr: string | null;
-    positionEn: string | null;
-    gradeCode: number | null;
-    employeeCategory: string | null;
-    insuranceCategory: string | null;
-    roleName: string | null;
-  }
-
-  const employeeRows: EmployeeRow[] = [];
+  const employeeRows: StaffImportRow[] = [];
+  const missingName: string[] = [];
 
   if (employeesSheet && empCols) {
     const cols = empCols;
@@ -235,9 +205,12 @@ export async function importOrgStructureExcel(
       if (!employeeNumber) continue;
 
       const fullNameAr = cellText(get(row, "اسم الموظف"));
+      // Email is optional since profiles.email dropped its NOT NULL
+      // (20260725000010): an HR row without a mailbox still gets a profile; it
+      // just cannot sign in through SSO until the directory carries it.
       const email = cellText(get(row, "EMAIL ID"))?.toLowerCase() ?? null;
-      if (!fullNameAr || !email) {
-        employeeErrors.push(`${employeeNumber}: missing required name or email — skipped`);
+      if (!fullNameAr) {
+        missingName.push(employeeNumber + ": missing required name — skipped");
         continue;
       }
 
@@ -264,194 +237,35 @@ export async function importOrgStructureExcel(
         employeeCategory: cellText(get(row, "Category"))?.trim() ?? null,
         insuranceCategory: cellText(get(row, "Insurance Category")),
         roleName: cellText(get(row, "الدور في النظام")),
+        supervisorNumber: cellText(get(row, ORG_STRUCTURE_IMPORT_COLUMNS.supervisorNumber)),
       });
     }
   }
 
-  // -----------------------------------------------------------------------
-  // 4. job_titles — find-or-create by (job_family_id, name_ar), the table's
-  //    own unique constraint. `ignoreDuplicates: true` means an existing
-  //    row's grade_level is never silently overwritten by a differently
-  //    graded row that happens to share the same title text.
-  // -----------------------------------------------------------------------
-  const distinctTitles = new Map<string, { name_ar: string; name_en: string | null; grade_level: number; job_family_id: string; category: "academic" | "admin" }>();
-  for (const emp of employeeRows) {
-    if (!emp.positionAr || emp.gradeCode == null) continue;
-    const isAcademic = emp.employeeCategory?.toLowerCase().startsWith("academic") ?? false;
-    const familyId = isAcademic ? academicFamilyId : generalFamilyId;
-    if (!familyId) continue;
-    const key = `${familyId}::${emp.positionAr}`;
-    if (!distinctTitles.has(key)) {
-      distinctTitles.set(key, {
-        name_ar: emp.positionAr,
-        name_en: emp.positionEn,
-        grade_level: emp.gradeCode,
-        job_family_id: familyId,
-        category: isAcademic ? "academic" : "admin",
-      });
-    }
-  }
-
-  if (distinctTitles.size > 0) {
-    const { error: titlesError } = await supabase
-      .from("job_titles")
-      .upsert([...distinctTitles.values()], { onConflict: "job_family_id,name_ar", ignoreDuplicates: true });
-    if (titlesError) {
-      positionErrors.push(`job_titles: ${titlesError.message}`);
-    }
-  }
-
-  const { data: allTitles } = await supabase.from("job_titles").select("id, job_family_id, name_ar").is("deleted_at", null);
-  const titleIdByKey = new Map((allTitles ?? []).map((t) => [`${t.job_family_id}::${t.name_ar}`, t.id]));
-
-  // -----------------------------------------------------------------------
-  // 5. Upsert profiles by employee_number — never sends an auth invite;
-  //    this is bulk historical data entry, not onboarding. auth_user_id
-  //    stays NULL (inviting each real person is a separate, deliberate
-  //    action, same as the existing single-employee "Add Employee" flow).
-  // -----------------------------------------------------------------------
-  const profileRows = employeeRows.map((emp) => {
-    const orgUnitId = emp.departmentAr ? orgUnitByName.get(emp.departmentAr) ?? null : null;
-    if (emp.departmentAr && !orgUnitId) unmatchedOrgUnitsSet.add(emp.departmentAr);
-
-    const isAcademic = emp.employeeCategory?.toLowerCase().startsWith("academic") ?? false;
-    const familyId = isAcademic ? academicFamilyId : generalFamilyId;
-    const titleKey = emp.positionAr && familyId ? `${familyId}::${emp.positionAr}` : null;
-    const jobTitleId = titleKey ? titleIdByKey.get(titleKey) ?? null : null;
-
-    // The employee number identifies the row and is always written; every
-    // other column is written only if the caller ticked it, so an unticked
-    // field is left alone instead of being blanked from a column they did not
-    // intend to import.
-    const row: Record<string, unknown> = {
-      employee_number: emp.employeeNumber,
-      full_name_ar: emp.fullNameAr,
-    };
-    const optional: Array<[string, string, unknown]> = [
-      ["fullNameEn", "full_name_en", emp.fullNameEn],
-      ["email", "email", emp.email],
-      ["department", "org_unit_id", orgUnitId],
-      ["positionAr", "job_title_id", jobTitleId],
-      ["hireDate", "hire_date", emp.hireDate],
-      ["qualification", "qualification", emp.qualification],
-      ["educationSpeciality", "education_speciality", emp.educationSpeciality],
-      ["dateOfBirth", "date_of_birth", emp.dateOfBirth],
-      ["mobile", "mobile", emp.mobile],
-      ["maritalStatus", "marital_status", emp.maritalStatus],
-      ["gender", "gender", emp.gender],
-      ["nationality", "nationality", emp.nationality],
-      ["employeeCategory", "employee_category", emp.employeeCategory],
-      ["insuranceCategory", "insurance_category", emp.insuranceCategory],
-    ];
-    for (const [field, column, value] of optional) {
-      if (writesField(options, field)) row[column] = value;
-    }
-    return row;
-  });
-
-  let employeesUpserted = 0;
+  const dryRun = formData.get("dryRun") === "1";
+  const emptyStaff: StaffImportSummary = {
+    employeesUpserted: 0, employeeErrors: [], rolesAssigned: 0, roleErrors: [], unmatchedOrgUnits: [],
+    supervisorsLinked: 0, unknownSupervisors: [], approvedCreated: 0, pendingCreated: 0, withoutEmail: 0, dryRun,
+  };
+  const staff = employeeRows.length > 0 ? await importStaffRows(supabase, employeeRows, options, actor.id, dryRun) : emptyStaff;
+  const employeeErrors = [...missingName, ...staff.employeeErrors];
+  const roleErrors = staff.roleErrors;
+  const employeesUpserted = staff.employeesUpserted;
+  const rolesAssigned = staff.rolesAssigned;
+  const unmatchedOrgUnitsSet = new Set(staff.unmatchedOrgUnits);
   const BATCH_SIZE = 50;
-  for (let i = 0; i < profileRows.length; i += BATCH_SIZE) {
-    const batch = profileRows.slice(i, i + BATCH_SIZE);
-    const { error, count } = await supabase.from("profiles").upsert(batch, {
-      onConflict: "employee_number",
-      // "Add new only" skips an employee who already has a record rather than
-      // rewriting it — the difference between the two modes, in one flag.
-      ignoreDuplicates: !updatesExisting(options),
-      count: "exact",
-    });
-    if (error) {
-      employeeErrors.push(`batch ${i / BATCH_SIZE + 1}: ${error.message}`);
-    } else {
-      employeesUpserted += count ?? batch.length;
-    }
-  }
 
-  // -----------------------------------------------------------------------
-  // 5b. Role assignment — the "الدور في النظام" column, read against real
-  //     employee names (2026-07-24 follow-up). Matched by `roles.name_ar`
-  //     (not role_code), since the template lists role names in Arabic like
-  //     everything else in this app. A linked account (auth_user_id set)
-  //     writes to `user_roles`; an invited-but-not-linked one writes to
-  //     `pending_role_assignments` (promoted automatically once they accept
-  //     their invite — see 20260721000001), same split the Employees list's
-  //     own role column already reads from. Always scope_type='all' — a
-  //     bulk sheet has no reasonable way to express an org-unit scope per
-  //     row. Both tables' uniqueness is a PARTIAL index
-  //     (`WHERE scope_type='all'`), the same limitation already hit for
-  //     org_structure_positions/evaluation_scores/calibration_results, so
-  //     this checks existing rows first rather than a blind upsert.
-  // -----------------------------------------------------------------------
-  const roleRowsToAssign = employeeRows.filter((e) => e.roleName);
-  let rolesAssigned = 0;
-  if (roleRowsToAssign.length > 0) {
-    const { data: rolesData } = await supabase.from("roles").select("id, name_ar");
-    const roleIdByName = new Map((rolesData ?? []).map((r) => [r.name_ar.trim(), r.id]));
-
-    const { data: profilesForRoles } = await supabase
-      .from("profiles")
-      .select("id, employee_number, auth_user_id")
-      .in(
-        "employee_number",
-        roleRowsToAssign.map((e) => e.employeeNumber)
-      );
-    const profileByNumber = new Map((profilesForRoles ?? []).map((p) => [p.employee_number, p]));
-
-    const linkedUserIds = (profilesForRoles ?? []).filter((p) => p.auth_user_id).map((p) => p.auth_user_id as string);
-    const unlinkedProfileIds = (profilesForRoles ?? []).filter((p) => !p.auth_user_id).map((p) => p.id);
-
-    const [{ data: existingUserRoles }, { data: existingPending }] = await Promise.all([
-      linkedUserIds.length > 0
-        ? supabase.from("user_roles").select("user_id, role_id").eq("scope_type", "all").in("user_id", linkedUserIds)
-        : Promise.resolve({ data: [] as { user_id: string; role_id: string }[] }),
-      unlinkedProfileIds.length > 0
-        ? supabase
-            .from("pending_role_assignments")
-            .select("profile_id, role_id")
-            .eq("scope_type", "all")
-            .in("profile_id", unlinkedProfileIds)
-        : Promise.resolve({ data: [] as { profile_id: string; role_id: string }[] }),
-    ]);
-    const existingUserRoleKeys = new Set((existingUserRoles ?? []).map((r) => `${r.user_id}::${r.role_id}`));
-    const existingPendingKeys = new Set((existingPending ?? []).map((r) => `${r.profile_id}::${r.role_id}`));
-
-    const newUserRoles: { user_id: string; role_id: string; scope_type: "all" }[] = [];
-    const newPending: { profile_id: string; role_id: string; scope_type: "all" }[] = [];
-
-    for (const emp of roleRowsToAssign) {
-      const roleId = roleIdByName.get(emp.roleName!.trim());
-      if (!roleId) {
-        roleErrors.push(`${emp.employeeNumber}: role "${emp.roleName}" not found — skipped`);
-        continue;
-      }
-      const profile = profileByNumber.get(emp.employeeNumber);
-      if (!profile) {
-        roleErrors.push(`${emp.employeeNumber}: profile not found after upsert — skipped`);
-        continue;
-      }
-      if (profile.auth_user_id) {
-        const key = `${profile.auth_user_id}::${roleId}`;
-        if (existingUserRoleKeys.has(key)) continue;
-        existingUserRoleKeys.add(key);
-        newUserRoles.push({ user_id: profile.auth_user_id, role_id: roleId, scope_type: "all" });
-      } else {
-        const key = `${profile.id}::${roleId}`;
-        if (existingPendingKeys.has(key)) continue;
-        existingPendingKeys.add(key);
-        newPending.push({ profile_id: profile.id, role_id: roleId, scope_type: "all" });
-      }
-    }
-
-    if (newUserRoles.length > 0) {
-      const { error, count } = await supabase.from("user_roles").insert(newUserRoles, { count: "exact" });
-      if (error) roleErrors.push(`user_roles: ${error.message}`);
-      else rolesAssigned += count ?? newUserRoles.length;
-    }
-    if (newPending.length > 0) {
-      const { error, count } = await supabase.from("pending_role_assignments").insert(newPending, { count: "exact" });
-      if (error) roleErrors.push(`pending_role_assignments: ${error.message}`);
-      else rolesAssigned += count ?? newPending.length;
-    }
+  if (dryRun) {
+    return {
+      status: "success",
+      summary: {
+        employeesUpserted: 0, employeeErrors, rolesAssigned: staff.rolesAssigned, roleErrors,
+        levelsCreated: 0, positionsUpserted: 0, positionErrors: [], assignmentsCreated: 0, assignmentErrors: [],
+        unmatchedOrgUnits: [...unmatchedOrgUnitsSet], corrections: [],
+        supervisorsLinked: 0, unknownSupervisors: staff.unknownSupervisors, approvedCreated: staff.approvedCreated,
+        pendingCreated: staff.pendingCreated, withoutEmail: staff.withoutEmail, dryRun: true,
+      },
+    };
   }
 
   // -----------------------------------------------------------------------
@@ -658,6 +472,10 @@ export async function importOrgStructureExcel(
       roleErrorCount: roleErrors.length,
       positionErrorCount: positionErrors.length,
       assignmentErrorCount: assignmentErrors.length,
+      supervisorsLinked: staff.supervisorsLinked,
+      unknownSupervisorCount: staff.unknownSupervisors.length,
+      approvedCreated: staff.approvedCreated,
+      pendingCreated: staff.pendingCreated,
     },
   });
 
@@ -675,6 +493,12 @@ export async function importOrgStructureExcel(
       assignmentErrors,
       unmatchedOrgUnits: [...unmatchedOrgUnitsSet],
       corrections,
+      supervisorsLinked: staff.supervisorsLinked,
+      unknownSupervisors: staff.unknownSupervisors,
+      approvedCreated: staff.approvedCreated,
+      pendingCreated: staff.pendingCreated,
+      withoutEmail: staff.withoutEmail,
+      dryRun: false,
     },
   };
 }

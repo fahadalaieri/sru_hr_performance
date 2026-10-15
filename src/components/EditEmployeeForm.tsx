@@ -125,7 +125,7 @@ export function EditEmployeeForm({
         <div className="sru-formgrid">
           <div className="sru-field">
             <label>{t("employeeNumberLabel")}</label>
-            <input type="text" defaultValue={profile.employee_number} disabled />
+            <input type="text" name="employeeNumber" required dir="ltr" style={{ textAlign: "left" }} defaultValue={profile.employee_number} />
           </div>
           <div className="sru-field">
             <label>{t("emailLabel")}</label>

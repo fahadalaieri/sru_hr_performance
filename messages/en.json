@@ -477,6 +477,10 @@
     "importSuccess": "Imported: {employees} employees, {roles} roles assigned, {levels} new levels, {positions} positions, {assignments} new assignments.",
     "importCorrections": "Automatic corrections applied ({count})",
     "importUnmatchedOrgUnits": "Departments not matched to an org unit ({count}) — fix these manually later",
+    "importUnknownSupervisors": "Unknown line managers ({count}) — the employee was created pending placement",
+    "importPreviewButton": "Preview (no changes)",
+    "importPreviewSummary": "Preview: {approved} employees would be approved, {pending} left pending placement, {noEmail} without email, {roles} roles would be assigned. Nothing was written.",
+    "importSuccessPlacement": "{linked} line managers linked, {approved} approved, {pending} pending placement.",
     "importWarnings": "Warnings ({count})",
     "importErrorInvalid": "Could not read the file — make sure it's a valid Excel file with the required data sheet and its mandatory columns.",
     "importErrorForbidden": "You don't have permission to do this.",
@@ -521,6 +525,7 @@
     "importFieldNationality": "Nationality",
     "importFieldEmployeeCategory": "Employee category",
     "importFieldInsuranceCategory": "Insurance category",
+    "importFieldSupervisor": "Line manager employee number",
     "chartSubtitle": "The approved organizational chart. Use the zoom buttons, and drag the image to pan.",
     "chartUpload": "Upload chart image",
     "chartReplace": "Replace image",
@@ -663,7 +668,13 @@
     "approvalStatusRejected": "Rejected",
     "approveButton": "Approve",
     "rejectButton": "Reject",
-    "reviewError": "Could not complete this action — check your permission."
+    "reviewError": "Could not complete this action — check your permission.",
+    "columnPlacement": "Placement & approval",
+    "placementOrgUnit": "Org unit",
+    "placementJobTitle": "Job title",
+    "placementSupervisor": "Line manager",
+    "placementKeep": "— keep as is —",
+    "placementTitleHint": "Title in the file: {hint}"
   },
   "CareerPathPage": {
     "title": "Career Path",

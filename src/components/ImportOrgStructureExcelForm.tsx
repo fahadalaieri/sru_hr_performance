@@ -49,6 +49,7 @@ export function ImportOrgStructureExcelForm({
     { key: "department", label: t("importFieldDepartment"), columnLabel: ORG_STRUCTURE_IMPORT_COLUMNS.department },
     { key: "positionAr", label: t("importFieldPosition"), columnLabel: ORG_STRUCTURE_IMPORT_COLUMNS.positionAr },
     { key: "role", label: t("importFieldRole"), columnLabel: ORG_STRUCTURE_IMPORT_COLUMNS.role },
+    { key: "supervisorNumber", label: t("importFieldSupervisor"), columnLabel: ORG_STRUCTURE_IMPORT_COLUMNS.supervisorNumber },
     { key: "hireDate", label: t("importFieldHireDate"), columnLabel: ORG_STRUCTURE_IMPORT_COLUMNS.hireDate },
     { key: "qualification", label: t("importFieldQualification"), columnLabel: ORG_STRUCTURE_IMPORT_COLUMNS.qualification },
     { key: "educationSpeciality", label: t("importFieldSpeciality"), columnLabel: ORG_STRUCTURE_IMPORT_COLUMNS.educationSpeciality },
@@ -72,6 +73,7 @@ export function ImportOrgStructureExcelForm({
       action={importOrgStructureExcel}
       pendingLabel={t("importing")}
       triggerVariant={triggerVariant}
+      previewLabel={t("importPreviewButton")}
     >
       {(state: ImportResult | null) => <OrgStructureImportOutcome state={state} />}
     </ExcelImportDialog>
@@ -83,7 +85,8 @@ function OrgStructureImportOutcome({ state }: { state: ImportResult | null }) {
   const router = useRouter();
 
   useEffect(() => {
-    if (state?.status === "success") router.refresh();
+    // A preview wrote nothing, so there is nothing to refresh.
+    if (state?.status === "success" && !state.summary.dryRun) router.refresh();
   }, [state, router]);
 
   if (!state) return null;
@@ -103,17 +106,50 @@ function OrgStructureImportOutcome({ state }: { state: ImportResult | null }) {
     ...state.summary.assignmentErrors,
   ];
 
+  const placement = state.summary;
   return (
     <div style={{ marginTop: 12, fontSize: 11.5 }}>
-      <p role="status" style={{ color: "var(--sru-success, #15803d)", marginBottom: 8 }}>
-        {t("importSuccess", {
-          employees: state.summary.employeesUpserted,
-          roles: state.summary.rolesAssigned,
-          levels: state.summary.levelsCreated,
-          positions: state.summary.positionsUpserted,
-          assignments: state.summary.assignmentsCreated,
-        })}
-      </p>
+      {placement.dryRun ? (
+        <p role="status" style={{ color: "var(--sru-purple)", marginBottom: 8 }}>
+          {t("importPreviewSummary", {
+            approved: placement.approvedCreated,
+            pending: placement.pendingCreated,
+            noEmail: placement.withoutEmail,
+            roles: placement.rolesAssigned,
+          })}
+        </p>
+      ) : (
+        <>
+          <p role="status" style={{ color: "var(--sru-success, #15803d)", marginBottom: 8 }}>
+            {t("importSuccess", {
+              employees: state.summary.employeesUpserted,
+              roles: state.summary.rolesAssigned,
+              levels: state.summary.levelsCreated,
+              positions: state.summary.positionsUpserted,
+              assignments: state.summary.assignmentsCreated,
+            })}
+          </p>
+          {(placement.supervisorsLinked > 0 || placement.approvedCreated > 0 || placement.pendingCreated > 0) && (
+            <p style={{ color: "var(--sru-muted)", marginBottom: 8 }}>
+              {t("importSuccessPlacement", {
+                linked: placement.supervisorsLinked,
+                approved: placement.approvedCreated,
+                pending: placement.pendingCreated,
+              })}
+            </p>
+          )}
+        </>
+      )}
+      {placement.unknownSupervisors.length > 0 && (
+        <details style={{ marginBottom: 6 }}>
+          <summary>{t("importUnknownSupervisors", { count: placement.unknownSupervisors.length })}</summary>
+          <ul style={{ paddingInlineStart: 18, color: "var(--sru-muted)" }}>
+            {placement.unknownSupervisors.map((u, i) => (
+              <li key={i}>{u}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       {state.summary.corrections.length > 0 && (
         <details style={{ marginBottom: 6 }}>
           <summary>{t("importCorrections", { count: state.summary.corrections.length })}</summary>
