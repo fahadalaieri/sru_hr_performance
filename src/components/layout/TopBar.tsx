@@ -6,6 +6,7 @@ import { ChevronDown, LogOut } from "lucide-react";
 import { locales, type Locale } from "@/i18n/config";
 import { Link, usePathname, useRouter } from "@/i18n/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { hasUniversityIdentitySession, loadSruSsoLibrary } from "@/lib/sruSso";
 import { UserMenu } from "./UserMenu";
 import { NotificationsBell, type NotificationRow } from "./NotificationsBell";
 
@@ -18,11 +19,14 @@ export function TopBar({
   locale,
   userName,
   notifications = [],
+  ssoEnabled = false,
 }: {
   locale: Locale;
   userName?: string;
   /** The caller's own notifications, fetched server-side in (app)/layout.tsx. */
   notifications?: NotificationRow[];
+  /** Whether the university SSO is configured (decided server-side from NEXT_PUBLIC_SRU_SSO_APP_KEY, like the login page). */
+  ssoEnabled?: boolean;
 }) {
   const t = useTranslations("TopBar");
   const pathname = usePathname();
@@ -32,6 +36,18 @@ export function TopBar({
   const handleSignOut = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
+    // A user who came in through the university SSO still holds the identity
+    // session in this origin's storage; ending only our session would let the
+    // next /login/sso visit re-enter silently as the same person (a shared
+    // device, or someone wanting another account). The central library's
+    // signOut ends that session too and then navigates to the login page.
+    if (ssoEnabled && hasUniversityIdentitySession()) {
+      const sso = await loadSruSsoLibrary();
+      if (sso) {
+        await sso.signOut(`/${locale}/login`);
+        return;
+      }
+    }
     router.push("/login");
     router.refresh();
   };

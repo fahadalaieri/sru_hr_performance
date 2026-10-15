@@ -131,6 +131,7 @@
     "gate": "Complete the sign-in with your university account in the window shown.",
     "exchanging": "Identity verified, opening your session on this platform…",
     "backToLogin": "Back to password sign-in",
+    "switchAccount": "Sign out of the university account and use another",
     "errors": {
       "sso_disabled": "Unified sign-on is not enabled on this platform yet. Sign in with your password or contact the Digital Transformation Department.",
       "invalid_assertion": "The sign-in assertion could not be verified. Please start again.",

@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, LogOut } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import type { Locale } from "@/i18n/config";
+import { loadSruSsoLibrary } from "@/lib/sruSso";
 
 /**
  * The university SSO hand-off page body. Loads the central library exactly as
@@ -17,18 +18,6 @@ import type { Locale } from "@/i18n/config";
  * SSO return lands on the page that started the sign-in, so that page must
  * continue the flow on plain load with no click.
  */
-declare global {
-  interface Window {
-    SRUSSO?: {
-      init: (opts: { appId: string; appName?: string; onReady?: (user: unknown) => void; onDenied?: (info: unknown) => void }) => Promise<unknown>;
-      assertion: () => Promise<string | null>;
-      signOut: (redirectTo?: string) => void;
-    };
-  }
-}
-
-const LIBRARY_SRC = "https://dt.sr.edu.sa/sso/v1/sru-sso.js";
-
 type Phase = "loading" | "gate" | "exchanging" | "error";
 type ErrorKey = "sso_disabled" | "invalid_assertion" | "replayed" | "no_profile" | "profile_pending" | "inactive" | "rate_limited" | "unknown" | "no_assertion" | "denied" | "library";
 
@@ -68,27 +57,16 @@ export function SsoLoginClient({ locale, appKey, appName }: { locale: Locale; ap
       fail(body.error ?? "unknown");
     };
 
-    const start = () => {
-      if (!window.SRUSSO) return fail("library");
+    void loadSruSsoLibrary().then((sso) => {
+      if (!sso) return fail("library");
       setPhase("gate");
-      window.SRUSSO.init({
+      sso.init({
         appId: appKey,
         appName,
         onReady: (user) => { void exchange((user as SsoUser | null) ?? null); },
         onDenied: () => fail("denied"),
       }).catch(() => fail("library"));
-    };
-
-    if (window.SRUSSO) {
-      start();
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = LIBRARY_SRC;
-    script.async = true;
-    script.onload = start;
-    script.onerror = () => fail("library");
-    document.body.appendChild(script);
+    });
   }, [appKey, appName, locale]);
 
   return (
@@ -102,6 +80,20 @@ export function SsoLoginClient({ locale, appKey, appName }: { locale: Locale; ap
           <AlertCircle size={15} aria-hidden />
           {t(`errors.${errorKey}`)}
         </p>
+      )}
+      {/* The university identity session lives in this origin's storage and
+          outlives any answer this platform gives (SSO INSTALL.md: a user who
+          signed in with the wrong account "stays stuck in it"). Without this
+          button a denied user could never try another university account:
+          the next visit silently continues as the same person. SRUSSO.signOut
+          clears that session and returns to the password login page. */}
+      {phase === "error" && (
+        <div className="sru-auth-sso">
+          <button type="button" className="sru-btn sru-btn-secondary sru-auth-sso-btn" onClick={() => void window.SRUSSO?.signOut(`/${locale}/login`)}>
+            <LogOut size={16} aria-hidden />
+            {t("switchAccount")}
+          </button>
+        </div>
       )}
       <p className="sru-auth-link-row">
         <Link href="/login">{t("backToLogin")}</Link>
