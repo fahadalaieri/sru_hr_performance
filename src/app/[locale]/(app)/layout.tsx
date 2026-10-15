@@ -107,7 +107,7 @@ export default async function AppShellLayout({
           موحدة". `position: fixed` (see globals.css) makes placement in the
           tree irrelevant to where it renders on the printed page. */}
       <PrintBranding />
-      <TopBar locale={safeLocale} userName={userName} notifications={notifications ?? []} />
+      <TopBar locale={safeLocale} userName={userName} notifications={notifications ?? []} ssoEnabled={Boolean(process.env.NEXT_PUBLIC_SRU_SSO_APP_KEY)} />
       <div className="sru-app-body">
         <Sidebar permissions={permissions} hasSubordinates={hasSubordinates ?? false} />
         <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>
