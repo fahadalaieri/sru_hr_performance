@@ -10,3 +10,10 @@
   NODE_VERSION = "22"
   # The lockfile was generated with npm 11; use the same major on the build image.
   NPM_FLAGS = "--no-audit --no-fund"
+
+# Upload-based deploys (no linked repo) do not auto-detect the framework
+# plugin: the first deploy published .next as static files and served 404s.
+# Declaring the runtime makes Netlify install it during the build. Unpinned
+# on purpose — Netlify keeps it current.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
