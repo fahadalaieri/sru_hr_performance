@@ -1,0 +1,12 @@
+# Netlify deployment of the development/trial instance (2026-10-15).
+# Next.js 16 is built by Netlify's own Next.js runtime (@netlify/plugin-nextjs),
+# which it installs automatically — do not add or pin it in package.json.
+# Environment variables live in the site's settings on Netlify, never here.
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # The lockfile was generated with npm 11; use the same major on the build image.
+  NPM_FLAGS = "--no-audit --no-fund"
