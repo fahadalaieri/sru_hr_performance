@@ -56,7 +56,7 @@ export async function buildEmployeeSelfTabs(mode: EmployeeSectionsMode): Promise
     ? await supabase
         .from("profiles")
         .select(
-          "id, employee_number, full_name_ar, full_name_en, email, hire_date, status, job_title_id, supervisor_id, qualification, education_speciality, mobile, certificates, org_units(name_ar), job_titles(name_ar, grade_level)"
+          "id, employee_number, full_name_ar, full_name_en, email, hire_date, status, job_title_id, supervisor_id, qualification, education_speciality, mobile, certificates, job_title_hint, org_units(name_ar), job_titles(name_ar, grade_level)"
         )
         .eq("auth_user_id", user.id)
         .maybeSingle()
@@ -77,6 +77,7 @@ export async function buildEmployeeSelfTabs(mode: EmployeeSectionsMode): Promise
         education_speciality: string | null;
         mobile: string | null;
         certificates: string | null;
+        job_title_hint: string | null;
         org_units: { name_ar: string } | null;
         job_titles: { name_ar: string; grade_level: number } | null;
       }
@@ -395,7 +396,13 @@ export async function buildEmployeeSelfTabs(mode: EmployeeSectionsMode): Promise
                     <dt>{t("orgUnitLabel")}</dt>
                     <dd>{p.org_units?.name_ar ?? "—"}</dd>
                     <dt>{t("jobTitleLabel")}</dt>
-                    <dd>{p.job_titles?.name_ar ?? "—"}</dd>
+                    <dd>
+                      {p.job_titles?.name_ar ?? "—"}
+                      {/* The HR file's free-text title, kept as a hint until an official title is chosen (2026-10-15 bulk onboarding). */}
+                      {!p.job_titles && p.job_title_hint && (
+                        <span style={{ display: "block", fontSize: 11, color: "var(--sru-muted)" }}>{t("jobTitleHint", { hint: p.job_title_hint })}</span>
+                      )}
+                    </dd>
                     <dt>{t("hireDateLabel")}</dt>
                     <dd>{p.hire_date ? formatDateDmy(p.hire_date, locale) : "—"}</dd>
                     <dt>{t("supervisorLabel")}</dt>

@@ -1521,6 +1521,7 @@
     "gradeLabel": "Grade {grade}",
     "supervisorLabel": "Supervisor",
     "supervisorNone": "No supervisor on record",
+    "jobTitleHint": "Title in the HR file: {hint} — awaiting an official title",
     "qualificationLabel": "Qualification",
     "certificatesLabel": "Certificates",
     "comingSoon": "Coming soon",
