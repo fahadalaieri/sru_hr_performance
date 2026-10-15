@@ -27,6 +27,9 @@ interface EmployeeRow {
   approval_status: string;
   org_units: { name_ar: string } | null;
   supervisor_id: string | null;
+  org_unit_id: string | null;
+  job_title_id: string | null;
+  job_title_hint: string | null;
 }
 
 // Auth is enforced centrally by (app)/layout.tsx — no per-page check needed.
@@ -64,7 +67,7 @@ export default async function EmployeesPage({
 
 
   const selectColumns =
-    "id, employee_number, full_name_ar, full_name_en, status, auth_user_id, created_by, approval_status, supervisor_id, org_units(name_ar)";
+    "id, employee_number, full_name_ar, full_name_en, status, auth_user_id, created_by, approval_status, supervisor_id, org_unit_id, job_title_id, job_title_hint, org_units(name_ar)";
 
   // RLS-scoped to the caller (profiles_select: self row, employeeData-scoped
   // view, recursive subordinate-chain view under employeeDataSubordinates,
@@ -76,7 +79,7 @@ export default async function EmployeesPage({
   if (orgUnitId) approvedQuery = approvedQuery.eq("org_unit_id", orgUnitId);
   if (status) approvedQuery = approvedQuery.eq("status", status);
 
-  const [{ data: approvedData }, { data: pendingData }, { data: mineData }, { data: orgUnitsData }] = await Promise.all([
+  const [{ data: approvedData }, { data: pendingData }, { data: mineData }, { data: orgUnitsData }, { data: jobTitlesData }, { data: supervisorsData }] = await Promise.all([
     approvedQuery,
     // Approval queue — only ever rendered below when canApproveEmployeeData
     // is true, but RLS already limits this independently of that UI gate.
@@ -92,7 +95,15 @@ export default async function EmployeesPage({
           .in("approval_status", ["pending", "rejected"])
       : Promise.resolve({ data: [] as EmployeeRow[] }),
     supabase.from("org_units").select("id, name_ar").order("name_ar"),
+    // Placement lists for the approval queue (2026-10-15). Both RLS-scoped to
+    // the caller; an approver who cannot see a title or a person cannot pick
+    // them, which is the right outcome.
+    supabase.from("job_titles").select("id, name_ar").is("deleted_at", null).order("name_ar"),
+    supabase.from("profiles").select("id, full_name_ar, employee_number").is("deleted_at", null).eq("approval_status", "approved").order("full_name_ar"),
   ]);
+  const approvalOrgUnits = (orgUnitsData ?? []).map((u) => ({ id: u.id as string, label: u.name_ar as string }));
+  const approvalJobTitles = (jobTitlesData ?? []).map((j) => ({ id: j.id as string, label: j.name_ar as string }));
+  const approvalSupervisors = (supervisorsData ?? []).map((p) => ({ id: p.id as string, label: `${p.full_name_ar} (${p.employee_number})` }));
 
   let approvedEmployees = (approvedData ?? []) as unknown as EmployeeRow[];
   const pendingEmployees = (pendingData ?? []) as unknown as EmployeeRow[];
@@ -316,7 +327,7 @@ export default async function EmployeesPage({
                   <th>{t("columnEmployeeNumber")}</th>
                   <th>{t("columnName")}</th>
                   <th>{t("columnOrgUnit")}</th>
-                  <th className="no-print">{t("columnActions")}</th>
+                  <th className="no-print">{t("columnPlacement")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -329,7 +340,13 @@ export default async function EmployeesPage({
                     </td>
                     <td>{employee.org_units?.name_ar ?? "—"}</td>
                     <td className="no-print">
-                      <EmployeeApprovalActions profileId={employee.id} />
+                      <EmployeeApprovalActions
+                        profileId={employee.id}
+                        current={{ orgUnitId: employee.org_unit_id, jobTitleId: employee.job_title_id, jobTitleHint: employee.job_title_hint, supervisorId: employee.supervisor_id }}
+                        orgUnits={approvalOrgUnits}
+                        jobTitles={approvalJobTitles}
+                        supervisors={approvalSupervisors}
+                      />
                     </td>
                   </tr>
                 ))}

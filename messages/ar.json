@@ -668,7 +668,13 @@
     "approvalStatusRejected": "مرفوض",
     "approveButton": "اعتماد",
     "rejectButton": "رفض",
-    "reviewError": "تعذّر تنفيذ الإجراء — تحقق من صلاحيتك."
+    "reviewError": "تعذّر تنفيذ الإجراء — تحقق من صلاحيتك.",
+    "columnPlacement": "الإسناد والاعتماد",
+    "placementOrgUnit": "الوحدة التنظيمية",
+    "placementJobTitle": "المسمّى الوظيفي",
+    "placementSupervisor": "الرئيس المباشر",
+    "placementKeep": "— كما هو —",
+    "placementTitleHint": "المسمّى في الملف: {hint}"
   },
   "CareerPathPage": {
     "title": "المسار الوظيفي",

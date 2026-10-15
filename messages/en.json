@@ -668,7 +668,13 @@
     "approvalStatusRejected": "Rejected",
     "approveButton": "Approve",
     "rejectButton": "Reject",
-    "reviewError": "Could not complete this action — check your permission."
+    "reviewError": "Could not complete this action — check your permission.",
+    "columnPlacement": "Placement & approval",
+    "placementOrgUnit": "Org unit",
+    "placementJobTitle": "Job title",
+    "placementSupervisor": "Line manager",
+    "placementKeep": "— keep as is —",
+    "placementTitleHint": "Title in the file: {hint}"
   },
   "CareerPathPage": {
     "title": "Career Path",

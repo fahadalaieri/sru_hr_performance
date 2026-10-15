@@ -6,6 +6,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 const editSchema = z.object({
   profileId: z.string().uuid(),
+  // Editable since 2026-10-15 so the SSO placeholder ("SSO-…") can be replaced
+  // by the real HR number on approval; UNIQUE on the column → "duplicate".
+  employeeNumber: z.string().trim().min(1).max(32),
   fullNameAr: z.string().trim().min(1),
   fullNameEn: z.string().trim().optional(),
   // Optional since 2026-07-25 (profiles.email dropped its NOT NULL) —
@@ -54,6 +57,7 @@ export type EditEmployeeState =
 export async function updateEmployee(_prevState: EditEmployeeState, formData: FormData): Promise<EditEmployeeState> {
   const parsed = editSchema.safeParse({
     profileId: formData.get("profileId"),
+    employeeNumber: formData.get("employeeNumber"),
     fullNameAr: formData.get("fullNameAr"),
     fullNameEn: formData.get("fullNameEn") || undefined,
     email: formData.get("email") || undefined,
@@ -94,6 +98,7 @@ export async function updateEmployee(_prevState: EditEmployeeState, formData: Fo
     .from("profiles")
     .update(
       {
+        employee_number: fields.employeeNumber,
         full_name_ar: fields.fullNameAr,
         full_name_en: fields.fullNameEn ?? null,
         email: fields.email ?? null,

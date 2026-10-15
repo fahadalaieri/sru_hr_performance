@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { reviewApprovalSchema } from "./approvalSchema";
 
 const deleteSchema = z.object({ profileId: z.string().uuid() });
 
@@ -60,11 +61,6 @@ export async function deleteEmployee(_prevState: DeleteEmployeeState, formData: 
   return { status: "success" };
 }
 
-const reviewApprovalSchema = z.object({
-  profileId: z.string().uuid(),
-  decision: z.enum(["approved", "rejected"]),
-});
-
 export type ReviewEmployeeApprovalState =
   | { status: "success" }
   | { status: "error"; message: "invalid_input" | "unauthenticated" | "forbidden" | "unknown" }
@@ -88,6 +84,9 @@ export async function reviewEmployeeApproval(
   const parsed = reviewApprovalSchema.safeParse({
     profileId: formData.get("profileId"),
     decision: formData.get("decision"),
+    orgUnitId: formData.get("orgUnitId") ?? undefined,
+    jobTitleId: formData.get("jobTitleId") ?? undefined,
+    supervisorId: formData.get("supervisorId") ?? undefined,
   });
   if (!parsed.success) {
     return { status: "error", message: "invalid_input" };
@@ -101,9 +100,13 @@ export async function reviewEmployeeApproval(
     return { status: "error", message: "unauthenticated" };
   }
 
-  const { profileId, decision } = parsed.data;
+  const { profileId, decision, orgUnitId, jobTitleId, supervisorId } = parsed.data;
 
-  const { data: target } = await supabase.from("profiles").select("org_unit_id, approval_status").eq("id", profileId).maybeSingle();
+  const { data: target } = await supabase
+    .from("profiles")
+    .select("org_unit_id, approval_status, job_title_id, supervisor_id")
+    .eq("id", profileId)
+    .maybeSingle();
   if (!target) {
     return { status: "error", message: "forbidden" };
   }
@@ -117,7 +120,27 @@ export async function reviewEmployeeApproval(
     return { status: "error", message: "forbidden" };
   }
 
-  const { error } = await supabase.from("profiles").update({ approval_status: decision }).eq("id", profileId);
+  // Placement (2026-10-15): only on approval, only what the approver chose.
+  // Moving the employee into ANOTHER unit needs approve on that unit too — a
+  // scoped approver must not place people outside their own scope.
+  const placement: Record<string, string> = {};
+  if (decision === "approved") {
+    if (orgUnitId && orgUnitId !== target.org_unit_id) {
+      const { data: canApproveThere } = await supabase.rpc("check_vpra", {
+        p_process_area: "employeeData",
+        p_min_level: "approve",
+        p_target_org_unit: orgUnitId,
+      });
+      if (!canApproveThere) {
+        return { status: "error", message: "forbidden" };
+      }
+      placement.org_unit_id = orgUnitId;
+    }
+    if (jobTitleId && jobTitleId !== target.job_title_id) placement.job_title_id = jobTitleId;
+    if (supervisorId && supervisorId !== target.supervisor_id) placement.supervisor_id = supervisorId;
+  }
+
+  const { error } = await supabase.from("profiles").update({ approval_status: decision, ...placement }).eq("id", profileId);
   if (error) {
     return { status: "error", message: "unknown" };
   }
@@ -128,8 +151,8 @@ export async function reviewEmployeeApproval(
     action: "employee_approval_reviewed",
     entity: "profiles",
     entity_id: profileId,
-    before_data: { approval_status: target.approval_status },
-    after_data: { approval_status: decision },
+    before_data: { approval_status: target.approval_status, org_unit_id: target.org_unit_id, job_title_id: target.job_title_id, supervisor_id: target.supervisor_id },
+    after_data: { approval_status: decision, ...placement },
   });
 
   return { status: "success" };
