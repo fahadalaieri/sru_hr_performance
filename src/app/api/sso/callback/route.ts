@@ -36,9 +36,27 @@ import { isLocale } from "@/i18n/config";
 const bodySchema = z.object({
   assertion: z.string().min(20).max(4096),
   locale: z.string().optional(),
+  /**
+   * The directory fields the SSO library hands the browser (ensure_app_access:
+   * nameAr / department / positionAr). NOT signed, so never used for identity
+   * or authorization — only as hints on a profile that HR must approve before
+   * it can log in. The signed `name` claim from the assertion takes precedence.
+   */
+  directory: z
+    .object({
+      nameAr: z.string().trim().max(200).nullish(),
+      department: z.string().trim().max(200).nullish(),
+      positionAr: z.string().trim().max(200).nullish(),
+    })
+    .optional(),
 });
 
-type Denial = "sso_disabled" | "invalid_assertion" | "replayed" | "no_profile" | "inactive" | "rate_limited" | "unknown";
+type Denial = "sso_disabled" | "invalid_assertion" | "replayed" | "no_profile" | "profile_pending" | "inactive" | "rate_limited" | "unknown";
+
+/** A visibly provisional employee number HR replaces when approving (profiles.employee_number is NOT NULL UNIQUE). */
+function provisionalEmployeeNumber(): string {
+  return `SSO-${Date.now().toString(36).toUpperCase()}`;
+}
 
 function deny(error: Denial, status: number) {
   return NextResponse.json({ error }, { status });
@@ -81,8 +99,47 @@ export async function POST(request: NextRequest) {
     .maybeSingle();
 
   if (!profile) {
-    await admin.from("audit_log").insert({ action: "sso_login_denied_no_profile", entity: "auth", after_data: { email: claims.email, kid } });
-    return deny("no_profile", 403);
+    // A university account with no HR profile yet (decided 2026-10-15): create
+    // the profile from what SSO knows, PENDING HR approval, and tell the user
+    // so. The signed name wins; department/position are matched by exact name
+    // against this platform's own org units and job titles, otherwise left
+    // empty for HR to fill in. The raw hints go to the audit row either way.
+    const hints = parsed.data.directory ?? {};
+    const displayName = (claims.name ?? hints.nameAr ?? "").trim() || claims.email.split("@")[0];
+    const [{ data: unit }, { data: titles }] = await Promise.all([
+      hints.department ? admin.from("org_units").select("id").eq("name_ar", hints.department).is("deleted_at", null).limit(2) : Promise.resolve({ data: [] as { id: string }[] }),
+      hints.positionAr ? admin.from("job_titles").select("id").eq("name_ar", hints.positionAr).is("deleted_at", null).limit(2) : Promise.resolve({ data: [] as { id: string }[] }),
+    ]);
+    const orgUnitId = unit && unit.length === 1 ? unit[0].id : null;
+    const jobTitleId = titles && titles.length === 1 ? titles[0].id : null;
+    const { data: created, error: createProfileError } = await admin
+      .from("profiles")
+      .insert({
+        employee_number: provisionalEmployeeNumber(),
+        full_name_ar: displayName,
+        email: claims.email,
+        org_unit_id: orgUnitId,
+        job_title_id: jobTitleId,
+        status: "active",
+        approval_status: "pending",
+      })
+      .select("id")
+      .single();
+    if (createProfileError || !created) {
+      await admin.from("audit_log").insert({ action: "sso_login_denied_no_profile", entity: "auth", after_data: { email: claims.email, kid, create_error: createProfileError?.code ?? null } });
+      return deny("no_profile", 403);
+    }
+    await admin.from("audit_log").insert({
+      action: "sso_profile_created_pending",
+      entity: "profiles",
+      entity_id: created.id,
+      after_data: { email: claims.email, name: displayName, sso_department: hints.department ?? null, sso_position: hints.positionAr ?? null, matched_org_unit: orgUnitId, matched_job_title: jobTitleId },
+    });
+    return deny("profile_pending", 403);
+  }
+  if (profile.approval_status === "pending") {
+    // Created on an earlier visit (or by HR) and still awaiting approval.
+    return deny("profile_pending", 403);
   }
   if (profile.status !== "active" || profile.approval_status !== "approved") {
     await admin.from("audit_log").insert({ action: "sso_login_denied_inactive", entity: "profiles", entity_id: profile.id, after_data: { status: profile.status, approval_status: profile.approval_status } });

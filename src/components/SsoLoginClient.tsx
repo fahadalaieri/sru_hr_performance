@@ -30,7 +30,10 @@ declare global {
 const LIBRARY_SRC = "https://dt.sr.edu.sa/sso/v1/sru-sso.js";
 
 type Phase = "loading" | "gate" | "exchanging" | "error";
-type ErrorKey = "sso_disabled" | "invalid_assertion" | "replayed" | "no_profile" | "inactive" | "rate_limited" | "unknown" | "no_assertion" | "denied" | "library";
+type ErrorKey = "sso_disabled" | "invalid_assertion" | "replayed" | "no_profile" | "profile_pending" | "inactive" | "rate_limited" | "unknown" | "no_assertion" | "denied" | "library";
+
+/** The directory hints the SSO library exposes on its user object (unsigned; the server treats them as hints only). */
+type SsoUser = { nameAr?: string | null; department?: string | null; positionAr?: string | null };
 
 export function SsoLoginClient({ locale, appKey, appName }: { locale: Locale; appKey: string; appName: string }) {
   const t = useTranslations("SsoPage");
@@ -47,14 +50,15 @@ export function SsoLoginClient({ locale, appKey, appName }: { locale: Locale; ap
       setPhase("error");
     };
 
-    const exchange = async () => {
+    const exchange = async (user: SsoUser | null) => {
       setPhase("exchanging");
       const token = await window.SRUSSO?.assertion();
       if (!token) return fail("no_assertion");
+      const directory = user ? { nameAr: user.nameAr ?? null, department: user.department ?? null, positionAr: user.positionAr ?? null } : undefined;
       const res = await fetch("/api/sso/callback", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ assertion: token, locale }),
+        body: JSON.stringify({ assertion: token, locale, directory }),
       });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; redirect?: string; error?: ErrorKey };
       if (res.ok && body.ok && body.redirect) {
@@ -70,7 +74,7 @@ export function SsoLoginClient({ locale, appKey, appName }: { locale: Locale; ap
       window.SRUSSO.init({
         appId: appKey,
         appName,
-        onReady: () => { void exchange(); },
+        onReady: (user) => { void exchange((user as SsoUser | null) ?? null); },
         onDenied: () => fail("denied"),
       }).catch(() => fail("library"));
     };

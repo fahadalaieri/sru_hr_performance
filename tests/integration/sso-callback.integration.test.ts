@@ -45,7 +45,6 @@ describe.skipIf(!enabled)("/api/sso/callback", () => {
     if (newcomerAuthUserId) await admin.auth.admin.deleteUser(newcomerAuthUserId);
     await admin.from("profiles").delete().eq("id", newcomerProfileId);
     await admin.from("sso_assertion_jti").delete().like("email", `tmp-it-sso-%${fx.tag}%`);
-    await admin.from("audit_log").delete().in("action", ["sso_login_denied_no_profile"]).like("after_data->>email", `tmp-it-sso-%${fx.tag}%`);
     await fx.cleanup();
   });
 
@@ -69,15 +68,6 @@ describe.skipIf(!enabled)("/api/sso/callback", () => {
   it("an assertion for another platform, or signed with an unknown kid, is refused", async () => {
     expect((await post(mint(existing.email, { aud: "majlis" }))).status).toBe(403);
     expect((await post(mint(existing.email, {}, "v99"))).status).toBe(403);
-  });
-
-  it("a university account with no HR profile is refused and audited", async () => {
-    const stranger = `tmp-it-sso-stranger-${fx.tag}@sru-dev.internal`;
-    const res = await post(mint(stranger));
-    expect(res.status).toBe(403);
-    expect((await res.json()).error).toBe("no_profile");
-    const { data } = await admin.from("audit_log").select("id").eq("action", "sso_login_denied_no_profile").eq("after_data->>email", stranger);
-    expect(data?.length).toBe(1);
   });
 
   it("first SSO login creates the auth account, links the profile, and grants the employee role", async () => {
