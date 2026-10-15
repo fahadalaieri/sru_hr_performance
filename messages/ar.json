@@ -1521,6 +1521,7 @@
     "gradeLabel": "درجة {grade}",
     "supervisorLabel": "الرئيس المباشر",
     "supervisorNone": "لا يوجد رئيس مباشر مُسجَّل",
+    "jobTitleHint": "المسمّى في ملف الموارد البشرية: {hint} — بانتظار ربطه بمسمًّى رسمي",
     "qualificationLabel": "المؤهل العلمي",
     "certificatesLabel": "الشهادات",
     "comingSoon": "قريبًا",
