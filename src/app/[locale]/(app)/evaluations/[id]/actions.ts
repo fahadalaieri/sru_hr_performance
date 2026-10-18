@@ -16,7 +16,9 @@ export type TransitionEvaluationResult =
   | { status: "success"; newState: EvaluationState }
   | {
       status: "error";
-      message: "invalid_input" | "unauthenticated" | "not_found" | "forbidden" | "no_result" | "unknown";
+      message: "invalid_input" | "unauthenticated" | "not_found" | "forbidden" | "no_result" | "incomplete" | "unknown";
+      /** For `incomplete`: the weighted methods that have no score (gate, 20261018000003). */
+      missing?: string[];
     };
 
 /** Maps a PostgREST/RPC error to the user-facing reason. The database is the boundary (20261018000001/2). */
@@ -25,6 +27,7 @@ function mapDbError(error: { code?: string; message: string }): TransitionEvalua
   if (error.code === "P0002") return { status: "error", message: "not_found" };
   if (error.code === "23514") {
     if (/no stored result/.test(error.message)) return { status: "error", message: "no_result" };
+    if (/incomplete/.test(error.message)) return { status: "error", message: "incomplete" };
     return { status: "error", message: "forbidden" };
   }
   return { status: "error", message: "unknown" };
@@ -44,9 +47,16 @@ function mapDbError(error: { code?: string; message: string }): TransitionEvalua
  * never exists without its stored result. `approved → finalized` is
  * `finalizeEvaluation`, reopening is `reopenEvaluation`.
  */
-export async function transitionEvaluation(evaluationId: string): Promise<TransitionEvaluationResult> {
+export async function transitionEvaluation(
+  evaluationId: string,
+  options: { overrideReason?: string } = {}
+): Promise<TransitionEvaluationResult> {
   const parsedId = z.string().uuid().safeParse(evaluationId);
   if (!parsedId.success) {
+    return { status: "error", message: "invalid_input" };
+  }
+  const overrideReason = z.string().trim().min(5).max(1000).optional().safeParse(options.overrideReason || undefined);
+  if (!overrideReason.success) {
     return { status: "error", message: "invalid_input" };
   }
 
@@ -92,6 +102,12 @@ export async function transitionEvaluation(evaluationId: string): Promise<Transi
     if (!snapshot) {
       return { status: "error", message: "no_result" };
     }
+    // Completeness gate (owner rule 2026-10-18): a weighted method without a
+    // single score blocks approval unless the approver records why.
+    if (snapshot.missing_required.length > 0 && !overrideReason.data) {
+      return { status: "error", message: "incomplete", missing: snapshot.missing_required };
+    }
+    if (overrideReason.data) snapshot.override_reason = overrideReason.data;
     const { data: resultId, error } = await supabase.rpc("approve_evaluation_with_result", {
       p_evaluation_id: parsedId.data,
       p_result: snapshot,
@@ -103,7 +119,7 @@ export async function transitionEvaluation(evaluationId: string): Promise<Transi
       entity: "evaluations",
       entity_id: parsedId.data,
       before_data: { state: currentState },
-      after_data: { state: "approved", result_id: resultId, final_score: snapshot.final_score, rating_band: snapshot.rating_band, applied_weight: snapshot.applied_weight, missing_methods: snapshot.missing_methods },
+      after_data: { state: "approved", result_id: resultId, final_score: snapshot.final_score, rating_band: snapshot.rating_band, applied_weight: snapshot.applied_weight, missing_methods: snapshot.missing_methods, missing_required: snapshot.missing_required, override_reason: snapshot.override_reason ?? null },
     });
     return { status: "success", newState: "approved" };
   }

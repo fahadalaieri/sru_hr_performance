@@ -17,7 +17,15 @@ const errorMessageKeys: Record<string, string> = {
   not_found: "errorNotFound",
   forbidden: "errorForbidden",
   no_result: "errorNoResult",
+  incomplete: "errorIncomplete",
   unknown: "errorUnknown",
+};
+
+const methodLabelKeys: Record<string, string> = {
+  activities: "methodActivities",
+  competencies: "methodCompetencies",
+  bau: "methodBau",
+  feedback360: "method360",
 };
 
 /**
@@ -42,7 +50,8 @@ export function EvaluationStateAction({
   const t = useTranslations("EvaluationDetailPage");
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [result, setResult] = useState<{ status: "success" } | { status: "error"; message: string } | null>(null);
+  const [result, setResult] = useState<{ status: "success" } | { status: "error"; message: string; missing?: string[] } | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
   const [reopenState, reopenAction, reopening] = useActionState<ReopenEvaluationState, FormData>(reopenEvaluation, null);
 
   useEffect(() => {
@@ -50,7 +59,7 @@ export function EvaluationStateAction({
   }, [reopenState, router]);
 
   const target = nextEvaluationState(currentState);
-  const run = (fn: () => Promise<{ status: "success" } | { status: "error"; message: string }>) => {
+  const run = (fn: () => Promise<{ status: "success" } | { status: "error"; message: string; missing?: string[] }>) => {
     setResult(null);
     startTransition(async () => {
       const res = await fn();
@@ -90,10 +99,35 @@ export function EvaluationStateAction({
           {t("advanceSuccess")}
         </p>
       )}
-      {result?.status === "error" && (
+      {result?.status === "error" && result.message !== "incomplete" && (
         <p role="alert" style={{ color: "#dc2626", fontSize: 12, marginTop: 8 }}>
           {t(errorMessageKeys[result.message] ?? "errorUnknown")}
         </p>
+      )}
+      {result?.status === "error" && result.message === "incomplete" && (
+        <div role="alert" style={{ marginTop: 10, padding: "10px 12px", border: "1px solid #fca5a5", borderRadius: 8, background: "#fef2f2", maxWidth: 560 }}>
+          <p style={{ color: "#b91c1c", fontSize: 12.5, margin: 0 }}>
+            {t("errorIncomplete", { methods: (result.missing ?? []).map((m) => t(methodLabelKeys[m] ?? "methodCompetencies")).join("، ") })}
+          </p>
+          {canApprove && (
+            <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+              <label style={{ fontSize: 12 }}>
+                {t("overrideReasonLabel")}
+                <textarea value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} minLength={5} maxLength={1000} rows={3} style={{ display: "block", width: "100%", marginTop: 4 }} />
+              </label>
+              <div>
+                <button
+                  type="button"
+                  disabled={isPending || overrideReason.trim().length < 5}
+                  onClick={() => run(() => transitionEvaluation(evaluationId, { overrideReason: overrideReason.trim() }))}
+                  className="sru-btn sru-btn-secondary"
+                >
+                  {isPending ? t("advancing") : t("approveWithOverrideButton")}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {canApprove && earlierStates.length > 0 && (
