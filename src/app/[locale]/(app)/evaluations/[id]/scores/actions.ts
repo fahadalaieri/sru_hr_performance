@@ -10,7 +10,7 @@ export type SaveEvaluationScoresState =
   | { status: "success" }
   | {
       status: "error";
-      message: "invalid_input" | "unauthenticated" | "not_found" | "forbidden" | "unknown";
+      message: "invalid_input" | "unauthenticated" | "not_found" | "forbidden" | "locked" | "unknown";
     }
   | null;
 
@@ -150,7 +150,9 @@ export async function saveEvaluationScores(
         return { status: "error", message: "forbidden" };
       }
       if (error.code === "23514") {
-        return { status: "error", message: "invalid_input" };
+        // Either the 0–100 CHECK or the post-approval lock (20261018000001);
+        // the lock names itself in its message.
+        return { status: "error", message: /locked/.test(error.message) ? "locked" : "invalid_input" };
       }
       return { status: "error", message: "unknown" };
     }
