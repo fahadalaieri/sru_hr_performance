@@ -14,14 +14,16 @@ import { EvaluationStateAction } from "@/components/EvaluationStateAction";
 import { resolveEvaluationCompetencies, describeCompetenciesSource } from "@/lib/evaluationCompetencies";
 import { behavioralLevelLabels } from "@/lib/data/competencies";
 import { resolveThreeSixtyReportForEvaluationCycle } from "@/lib/threeSixtyEvaluationLink";
+import { RATING_BANDS } from "@/lib/ratingBands";
+import { formatDateDmy } from "@/lib/dateParts";
 
 // Auth is enforced centrally by (app)/layout.tsx — no per-page check needed.
 export default async function EvaluationDetailPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ id: string; locale: string }>;
 }) {
-  const { id } = await params;
+  const { id, locale } = await params;
   const t = await getTranslations("EvaluationDetailPage");
   const supabase = await createClient();
 
@@ -104,6 +106,31 @@ export default async function EvaluationDetailPage({
   const activities = (activityData ?? []) as Array<{ id: string; title_ar: string }>;
 
   const threeSixtyReport = await resolveThreeSixtyReportForEvaluationCycle(supabase, evaluation.cycle_id, evaluation.employee_id);
+
+  // The official result stored at approval (20261018000002), read through
+  // evaluation_results' own RLS; and whether this viewer may approve/finalize/
+  // reopen (decides which lifecycle controls render — the database re-checks).
+  const viewerOrgUnitForApproval =
+    (evaluation.profiles as unknown as { org_unit_id: string | null } | null)?.org_unit_id ?? null;
+  const [{ data: officialResultRow }, { data: canApproveData }] = await Promise.all([
+    supabase
+      .from("evaluation_results")
+      .select("final_score, rating_band, applied_weight, missing_methods, weights_source, approved_at, method_scores")
+      .eq("evaluation_id", evaluation.id)
+      .is("superseded_at", null)
+      .maybeSingle(),
+    supabase.rpc("check_vpra", { p_process_area: "evaluation", p_min_level: "approve", p_target_org_unit: viewerOrgUnitForApproval }),
+  ]);
+  const officialResult = officialResultRow as {
+    final_score: string | number | null;
+    rating_band: string | null;
+    applied_weight: string | number;
+    missing_methods: string[];
+    weights_source: "cycle" | "orgUnit";
+    approved_at: string;
+    method_scores: Record<string, number | null>;
+  } | null;
+  const canApprove = canApproveData === true;
 
   const { data: scoreData } = await supabase
     .from("evaluation_scores")
@@ -314,11 +341,38 @@ export default async function EvaluationDetailPage({
         <p style={{ fontSize: 13, marginBottom: 12 }}>
           <strong>{t("stateLabel")}</strong> {evaluationStateLabels[state]}
         </p>
-        <EvaluationStateAction evaluationId={evaluation.id} currentState={state} />
+        <EvaluationStateAction evaluationId={evaluation.id} currentState={state} canApprove={canApprove} />
       </div>
 
+      {officialResult && (
+        <section className="sru-card" style={{ marginBottom: 20, padding: "14px 16px", borderInlineStart: "4px solid var(--sru-purple)" }}>
+          <h2 style={{ fontSize: 14, margin: 0 }}>{t("officialResultHeading")}</h2>
+          <p style={{ color: "var(--sru-muted)", fontSize: 12, margin: "4px 0 10px" }}>
+            {t("officialResultNote", { date: formatDateDmy(officialResult.approved_at.slice(0, 10), locale) })}
+          </p>
+          {officialResult.final_score == null ? (
+            <p style={{ color: "var(--sru-muted)", fontSize: 13, margin: 0 }}>{t("weightedResultEmpty")}</p>
+          ) : (
+            <p style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
+              {Number(officialResult.final_score).toFixed(1)}%
+              <span style={{ fontSize: 13, fontWeight: 600, marginInlineStart: 10, color: "var(--sru-muted)" }}>
+                {RATING_BANDS.find((b) => b.id === officialResult.rating_band)?.labelAr ?? ""}
+              </span>
+            </p>
+          )}
+          {officialResult.missing_methods.length > 0 && (
+            <p style={{ color: "var(--sru-muted)", fontSize: 12, marginTop: 6 }}>
+              {t("weightedResultPartial", {
+                applied: Number(officialResult.applied_weight),
+                methods: officialResult.missing_methods.map((m) => methodLabel[m as EvaluationMethod] ?? m).join("، "),
+              })}
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="sru-card" style={{ marginBottom: 20, padding: "14px 16px" }}>
-        <h2 style={{ fontSize: 14, margin: 0 }}>{t("weightedResultHeading")}</h2>
+        <h2 style={{ fontSize: 14, margin: 0 }}>{officialResult ? t("liveResultHeading") : t("weightedResultHeading")}</h2>
         <p style={{ color: "var(--sru-muted)", fontSize: 12, margin: "4px 0 10px" }}>
           {t("weightedResultNote", {
             distribution: evaluationMethods
