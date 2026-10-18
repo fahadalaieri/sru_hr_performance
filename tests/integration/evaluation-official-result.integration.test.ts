@@ -116,6 +116,26 @@ describe.skipIf(!hasDatabase)("official evaluation result (approve / finalize / 
     });
   });
 
+  it("an incomplete snapshot is refused without an override reason, and stored with it (20261018000003)", async () => {
+    const incomplete = JSON.parse(snapshot);
+    incomplete.missing_required = ["activities", "bau"];
+    await inTransaction("committee_reviewed", async (ev) => {
+      await asUser(c, hr.authUserId);
+      await c.query("SAVEPOINT s");
+      await expect(c.query("SELECT approve_evaluation_with_result($1, $2::jsonb)", [ev, JSON.stringify(incomplete)])).rejects.toMatchObject({ code: "23514" });
+      await c.query("ROLLBACK TO SAVEPOINT s");
+      await c.query("SAVEPOINT t");
+      await expect(c.query("SELECT approve_evaluation_with_result($1, $2::jsonb)", [ev, JSON.stringify({ ...incomplete, override_reason: "قصير" })])).rejects.toMatchObject({ code: "23514" });
+      await c.query("ROLLBACK TO SAVEPOINT t");
+      await c.query("SELECT approve_evaluation_with_result($1, $2::jsonb)", [ev, JSON.stringify({ ...incomplete, override_reason: "الموظف في إجازة طويلة ولا أنشطة مكلَّف بها" })]);
+      await asService(c);
+      const row = (await c.query("SELECT missing_required, approval_override_reason FROM evaluation_results WHERE evaluation_id=$1 AND superseded_at IS NULL", [ev])).rows[0];
+      expect(row.missing_required).toEqual(["activities", "bau"]);
+      expect(row.approval_override_reason).toBe("الموظف في إجازة طويلة ولا أنشطة مكلَّف بها");
+      expect((await c.query("SELECT state FROM evaluations WHERE id=$1", [ev])).rows[0].state).toBe("approved");
+    });
+  });
+
   it("reopen is refused for non-approvers and for a non-earlier target", async () => {
     await inTransaction("approved", async (ev) => {
       await asUser(c, supervisor.authUserId);

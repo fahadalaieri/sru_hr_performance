@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MethodWeights } from "./evaluationCycle";
 import { resolveEvaluationResultsForCycle, type EmployeeCycleResult } from "./evaluationResult";
+import { assessCompleteness } from "./evaluationCompleteness";
 
 /**
  * The official-result snapshot stored at approval (20261018000002).
@@ -20,11 +21,16 @@ export interface EvaluationResultSnapshot {
   rating_band: string | null;
   feedback360_percent: number | null;
   scores_count: number;
+  /** Weighted methods that could have been scored and were not (gate, 20261018000003). */
+  missing_required: string[];
+  /** Set only when an approver overrides the gate; stored with the snapshot. */
+  override_reason?: string;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export function toResultSnapshot(result: EmployeeCycleResult, scoresCount: number): EvaluationResultSnapshot {
+export function toResultSnapshot(result: EmployeeCycleResult, scoresCount: number, hasThreeSixtyCycle = false): EvaluationResultSnapshot {
+  const completeness = assessCompleteness({ weights: result.weights, methodScores: result.methodScores, hasThreeSixtyCycle });
   return {
     weights: result.weights,
     weights_source: result.weightsSource,
@@ -40,6 +46,7 @@ export function toResultSnapshot(result: EmployeeCycleResult, scoresCount: numbe
     rating_band: result.band?.id ?? null,
     feedback360_percent: result.methodScores.feedback360 == null ? null : round2(result.methodScores.feedback360),
     scores_count: scoresCount,
+    missing_required: completeness.missingRequired,
   };
 }
 
@@ -68,11 +75,9 @@ export async function buildEvaluationResultSnapshot(supabase: SupabaseClient, ev
   const rows = await resolveEvaluationResultsForCycle(supabase, evaluation.cycle_id, cycleWeights, { employeeIds: [evaluation.employee_id] });
   const row = rows.find((r) => r.evaluationId === evaluation.id);
   if (!row) return null;
-  const { count } = await supabase
-    .from("evaluation_scores")
-    .select("id", { count: "exact", head: true })
-    .eq("evaluation_id", evaluation.id)
-    .is("deleted_at", null)
-    .not("score", "is", null);
-  return toResultSnapshot(row, count ?? 0);
+  const [{ count }, { data: linked360 }] = await Promise.all([
+    supabase.from("evaluation_scores").select("id", { count: "exact", head: true }).eq("evaluation_id", evaluation.id).is("deleted_at", null).not("score", "is", null),
+    supabase.from("three_sixty_cycles").select("id").eq("evaluation_cycle_id", evaluation.cycle_id).is("deleted_at", null).maybeSingle(),
+  ]);
+  return toResultSnapshot(row, count ?? 0, Boolean(linked360));
 }
