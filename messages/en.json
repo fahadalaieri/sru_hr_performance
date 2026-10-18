@@ -1703,6 +1703,7 @@
     "errorUnauthenticated": "You must be logged in.",
     "errorNotFound": "This evaluation doesn't exist or you don't have permission to view it.",
     "errorForbidden": "You don't have permission to enter scores for this evaluation.",
+    "errorLocked": "This evaluation is approved and its scores are locked; correcting them needs approval rights.",
     "errorUnknown": "An unexpected error occurred.",
     "bauHeading": "Routine tasks",
     "bauEmpty": "This employee has no routine tasks in this cycle.",

@@ -121,6 +121,10 @@ export async function transitionEvaluation(
     .maybeSingle();
 
   if (error) {
+    // 23514 = the database state machine (20261018000001) refused the move:
+    // wrong relationship for this step, a skipped state, or a reopen by a
+    // non-approver. The table, not this action, is the boundary now.
+    if (error.code === "23514") return { status: "error", message: "forbidden" };
     return { status: "error", message: "unknown" };
   }
 

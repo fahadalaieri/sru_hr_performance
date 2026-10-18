@@ -23,6 +23,7 @@ const errorMessageKeys: Record<ErrorMessage, string> = {
   unauthenticated: "errorUnauthenticated",
   not_found: "errorNotFound",
   forbidden: "errorForbidden",
+  locked: "errorLocked",
   unknown: "errorUnknown",
 };
 
