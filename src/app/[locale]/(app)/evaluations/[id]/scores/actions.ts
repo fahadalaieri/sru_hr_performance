@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveEvaluationCompetencies } from "@/lib/evaluationCompetencies";
+import { collectScoreRows } from "@/lib/evaluationScoreForm";
 
 export type SaveEvaluationScoresState =
   | { status: "success" }
@@ -12,15 +13,6 @@ export type SaveEvaluationScoresState =
       message: "invalid_input" | "unauthenticated" | "not_found" | "forbidden" | "unknown";
     }
   | null;
-
-const scoreFieldSchema = z
-  .string()
-  .trim()
-  .optional()
-  .transform((v) => (v === undefined || v === "" ? null : v))
-  .pipe(z.string().refine((v) => v === null || (!Number.isNaN(Number(v)) && Number(v) >= 0 && Number(v) <= 100), {
-    message: "score out of range",
-  }).nullable());
 
 /**
  * Saves competency/activity/BAU-task scores for one evaluation
@@ -109,50 +101,19 @@ export async function saveEvaluationScores(
     .eq("cycle_id", evaluation.cycle_id)
     .is("deleted_at", null);
 
-  type Row = { subjectColumn: "competency_id" | "activity_id" | "bau_task_id"; subjectId: string; score: string | null; comment: string | null };
-  const rows: Row[] = [];
-
-  for (const competency of competencies ?? []) {
-    const scoreParsed = scoreFieldSchema.safeParse(formData.get(`score_competency_${competency.id}`)?.toString());
-    const comment = formData.get(`comment_competency_${competency.id}`)?.toString().trim();
-    if (!scoreParsed.success) {
-      return { status: "error", message: "invalid_input" };
-    }
-    rows.push({
-      subjectColumn: "competency_id",
-      subjectId: competency.id,
-      score: scoreParsed.data,
-      comment: comment || null,
-    });
+  // Only the subjects the form actually posted are written (2026-10-18):
+  // the page renders one method at a time, and rebuilding every subject
+  // here used to write null over the other methods' saved scores.
+  const collected = collectScoreRows(formData, {
+    competencies: (competencies ?? []).map((c) => c.id),
+    activities: (activities ?? []).map((a) => a.id),
+    bauTasks: (bauTasks ?? []).map((t) => t.id),
+  });
+  if (!collected.ok) {
+    return { status: "error", message: "invalid_input" };
   }
-
-  for (const activity of activities ?? []) {
-    const scoreParsed = scoreFieldSchema.safeParse(formData.get(`score_activity_${activity.id}`)?.toString());
-    const comment = formData.get(`comment_activity_${activity.id}`)?.toString().trim();
-    if (!scoreParsed.success) {
-      return { status: "error", message: "invalid_input" };
-    }
-    rows.push({
-      subjectColumn: "activity_id",
-      subjectId: activity.id,
-      score: scoreParsed.data,
-      comment: comment || null,
-    });
-  }
-
-  for (const task of bauTasks ?? []) {
-    const scoreParsed = scoreFieldSchema.safeParse(formData.get(`score_bau_${task.id}`)?.toString());
-    const comment = formData.get(`comment_bau_${task.id}`)?.toString().trim();
-    if (!scoreParsed.success) {
-      return { status: "error", message: "invalid_input" };
-    }
-    rows.push({
-      subjectColumn: "bau_task_id",
-      subjectId: task.id,
-      score: scoreParsed.data,
-      comment: comment || null,
-    });
-  }
+  const rows = collected.rows;
+  const changes: Array<{ subject: string; id: string; before: { score: number | null; comment: string | null } | null; after: { score: number | null; comment: string | null } }> = [];
 
   let touchedCompetencies = 0;
   let touchedActivities = 0;
@@ -161,7 +122,7 @@ export async function saveEvaluationScores(
   for (const row of rows) {
     const { data: existing } = await supabase
       .from("evaluation_scores")
-      .select("id")
+      .select("id, score, comment")
       .eq("evaluation_id", parsedId.data)
       .eq(row.subjectColumn, row.subjectId)
       .maybeSingle();
@@ -172,7 +133,11 @@ export async function saveEvaluationScores(
       continue;
     }
 
-    const payload = { score: row.score === null ? null : Number(row.score), comment: row.comment };
+    const payload = { score: row.score, comment: row.comment };
+    // Unchanged → no write, no audit noise.
+    if (existing && existing.score === payload.score && (existing.comment ?? null) === payload.comment) {
+      continue;
+    }
 
     const { error } = existing
       ? await supabase.from("evaluation_scores").update(payload).eq("id", existing.id)
@@ -193,6 +158,12 @@ export async function saveEvaluationScores(
     if (row.subjectColumn === "competency_id") touchedCompetencies++;
     else if (row.subjectColumn === "activity_id") touchedActivities++;
     else touchedBauTasks++;
+    changes.push({
+      subject: row.subjectColumn,
+      id: row.subjectId,
+      before: existing ? { score: existing.score, comment: existing.comment ?? null } : null,
+      after: payload,
+    });
   }
 
   const admin = createAdminClient();
@@ -201,10 +172,14 @@ export async function saveEvaluationScores(
     action: "evaluation_scores_saved",
     entity: "evaluation_scores",
     entity_id: parsedId.data,
+    // Before/after per score (2026-10-18): the counters alone could not
+    // explain or recover a score that changed.
+    before_data: { scores: changes.map((c) => ({ subject: c.subject, id: c.id, ...c.before })) },
     after_data: {
       competencies_saved: touchedCompetencies,
       activities_saved: touchedActivities,
       bau_tasks_saved: touchedBauTasks,
+      scores: changes.map((c) => ({ subject: c.subject, id: c.id, ...c.after })),
     },
   });
 
