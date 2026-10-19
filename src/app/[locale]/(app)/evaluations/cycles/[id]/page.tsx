@@ -9,6 +9,8 @@ import { formatDateDmy } from "@/lib/dateParts";
 import { CycleMethodWeightsForm } from "@/components/CycleMethodWeightsForm";
 import { OrgUnitWeightsManager, type OrgUnitWeightsRow } from "@/components/OrgUnitWeightsManager";
 import { summariseCycleScoring, type MethodWeights } from "@/lib/evaluationCycle";
+import { loadCyclePlan, summarisePlan } from "@/lib/cycleEvaluations";
+import { CycleLaunchPanel } from "@/components/CycleLaunchPanel";
 
 import {
   canAdvanceEvaluationState,
@@ -79,6 +81,14 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
 
   const { data: roleCodes } = await supabase.rpc("get_my_role_codes");
   const myRoles = (roleCodes ?? []) as RoleCode[];
+
+  // Launching the cycle (phase 2 item 5): the population and who is missing an
+  // evaluation. Only a global approver sees the tab — the plan reads every
+  // profile, which is exactly the scope launching needs.
+  const { data: canLaunchData } = await supabase.rpc("check_vpra_global", { p_process_area: "evaluation", p_min_level: "approve" });
+  const canLaunch = canLaunchData === true;
+  const launchPlan = canLaunch ? await loadCyclePlan(supabase, id) : null;
+  const launchSummary = launchPlan ? summarisePlan(launchPlan) : null;
 
   // Direct reports only — profiles.supervisor_id, the same relationship the
   // review policies use.
@@ -273,6 +283,11 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
         </>
       ),
     },
+    ...(launchSummary ? [{
+      id: "launch",
+      label: t("subTabLaunch"),
+      content: <CycleLaunchPanel cycleId={cycle.id} initial={launchSummary} canLaunch={canLaunch} />,
+    }] : []),
     ...(canViewWeights ? [{
       id: "weights",
       label: t("subTabWeights"),
@@ -328,6 +343,12 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
               <span className="sru-home-tile-label">{tCycles("metricRemaining")}</span>
               <strong>{cycleScoringSummary.remaining.toLocaleString(digits)}</strong>
             </span>
+            {launchSummary && (
+              <span className="sru-home-tile">
+                <span className="sru-home-tile-label">{t("launchToCreate")}</span>
+                <strong>{launchSummary.toCreate.toLocaleString(digits)}</strong>
+              </span>
+            )}
             <span className="sru-home-tile">
               <span className="sru-home-tile-label">{tCycles("metricAverage")}</span>
               {/* Never 0 when nothing was scored — an untouched cycle must
