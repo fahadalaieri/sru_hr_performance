@@ -8,7 +8,8 @@ export type ScorableCompetency = {
 };
 
 export type EvaluationCompetenciesResolution = {
-  source: "employee" | "job_title" | "framework";
+  /** "core": nothing assigned to the employee or their title, so the framework's auto-apply (أساسية) competencies apply (2026-10-21). */
+  source: "employee" | "job_title" | "core";
   jobTitleNameAr: string | null;
   competencies: ScorableCompetency[];
 };
@@ -106,20 +107,28 @@ export async function resolveEvaluationCompetencies(
       }));
   }
 
+  // The whole framework is still needed to re-attach already-scored extras;
+  // the FALLBACK, though, is only the classification flagged
+  // auto_apply_everywhere (الجدارات الأساسية — 11 of 27 on 2026-10-21). Scoring
+  // every employee on 16 specialised competencies unrelated to their work was
+  // the content gap the 2026-10-18 review named; specialised ones now reach
+  // an evaluation only through the employee's record or their job title.
   const { data: allCompetenciesData } = await supabase
     .from("competencies")
-    .select("id, name_ar")
+    .select("id, name_ar, competency_classifications(auto_apply_everywhere)")
     .is("deleted_at", null);
 
-  const allCompetencies: ScorableCompetency[] = (
-    (allCompetenciesData as unknown as Array<{ id: string; name_ar: string }> | null) ?? []
-  ).map((c) => ({ id: c.id, nameAr: c.name_ar, requiredLevel: null }));
+  const allRows = (allCompetenciesData as unknown as Array<{ id: string; name_ar: string; competency_classifications: { auto_apply_everywhere: boolean } | null }> | null) ?? [];
+  const allCompetencies: ScorableCompetency[] = allRows.map((c) => ({ id: c.id, nameAr: c.name_ar, requiredLevel: null }));
+  const coreCompetencies: ScorableCompetency[] = allRows
+    .filter((c) => c.competency_classifications?.auto_apply_everywhere)
+    .map((c) => ({ id: c.id, nameAr: c.name_ar, requiredLevel: null }));
 
   const byId = new Map(allCompetencies.map((c) => [c.id, c]));
 
-  const source: "employee" | "job_title" | "framework" =
-    employeeAssigned.length > 0 ? "employee" : jobTitleAssigned.length > 0 ? "job_title" : "framework";
-  const base = employeeAssigned.length > 0 ? employeeAssigned : jobTitleAssigned.length > 0 ? jobTitleAssigned : allCompetencies;
+  const source: "employee" | "job_title" | "core" =
+    employeeAssigned.length > 0 ? "employee" : jobTitleAssigned.length > 0 ? "job_title" : "core";
+  const base = employeeAssigned.length > 0 ? employeeAssigned : jobTitleAssigned.length > 0 ? jobTitleAssigned : coreCompetencies;
   const baseIds = new Set(base.map((c) => c.id));
 
   const extras = extraCompetencyIds
@@ -140,12 +149,12 @@ export async function resolveEvaluationCompetencies(
 export function describeCompetenciesSource(
   source: EvaluationCompetenciesResolution["source"],
   jobTitleNameAr: string | null
-): { key: "competenciesFromEmployee" | "competenciesFromJobTitle" | "competenciesFromFramework"; params?: { jobTitle: string } } {
+): { key: "competenciesFromEmployee" | "competenciesFromJobTitle" | "competenciesFromCore"; params?: { jobTitle: string } } {
   if (source === "employee") {
     return { key: "competenciesFromEmployee" };
   }
   if (source === "job_title" && jobTitleNameAr) {
     return { key: "competenciesFromJobTitle", params: { jobTitle: jobTitleNameAr } };
   }
-  return { key: "competenciesFromFramework" };
+  return { key: "competenciesFromCore" };
 }

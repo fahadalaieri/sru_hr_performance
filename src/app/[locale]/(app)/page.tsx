@@ -7,7 +7,6 @@ import {
   FileSignature,
   GraduationCap,
   ListTodo,
-  Target,
   UserRoundCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -126,11 +125,6 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
           .order("created_at", { ascending: false })
           .limit(1),
         supabase
-          .from("goals")
-          .select("id", { count: "exact", head: true })
-          .eq("employee_id", profile.id)
-          .is("deleted_at", null),
-        supabase
           .from("bau_tasks")
           .select("id", { count: "exact", head: true })
           .eq("employee_id", profile.id)
@@ -139,8 +133,7 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
     : null;
 
   const myEvaluation = (mine?.[0].data ?? [])[0] as { id: string; state: EvaluationState } | undefined;
-  const myGoals = mine?.[1].count ?? 0;
-  const myTasks = mine?.[2].count ?? 0;
+  const myTasks = mine?.[1].count ?? 0;
 
   // ---- the queue ---------------------------------------------------------
   const queue: Array<{ key: string; count: number; href: string; icon: ReactNode }> = [];
@@ -297,13 +290,6 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
             </span>
             <strong>{myEvaluation ? evaluationStateLabels[myEvaluation.state] : t("mineEvaluationNone")}</strong>
           </Link>
-          <span className="sru-home-tile">
-            <span className="sru-home-tile-label">
-              <Target size={14} aria-hidden />
-              {t("mineGoals")}
-            </span>
-            <strong>{myGoals.toLocaleString(digits)}</strong>
-          </span>
           <span className="sru-home-tile">
             <span className="sru-home-tile-label">
               <ListTodo size={14} aria-hidden />

@@ -92,29 +92,6 @@ export async function buildEmployeeSelfTabs(mode: EmployeeSectionsMode): Promise
   const { data: supervisorRows } = p?.supervisor_id ? await supabase.rpc("get_my_supervisor") : { data: null };
   const supervisor = (supervisorRows?.[0] as { full_name_ar: string; full_name_en: string | null } | undefined) ?? null;
 
-  // Deliberately filtered to `employee_id = my own profile id`, same
-  // discipline as /evaluations/mine — goals_select's RLS would also let
-  // broader roles (org-unit scoped goalAssignment=prepare, direct
-  // supervisors) see this data, which is wrong for a "my own goals" view.
-  const { data: goalsData } = wantsWork && p
-    ? await supabase
-        .from("goals")
-        .select("id, custom_title_ar, weight, target_ar, status, goal_library(title_ar), evaluation_cycles(name_ar)")
-        .eq("employee_id", p.id)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-    : { data: null };
-
-  const goals = goalsData as unknown as Array<{
-    id: string;
-    custom_title_ar: string | null;
-    weight: number | null;
-    target_ar: string | null;
-    status: string;
-    goal_library: { title_ar: string } | null;
-    evaluation_cycles: { name_ar: string } | null;
-  }> | null;
-
   // Same self-scoping discipline as goals above — bau_tasks_select's RLS
   // has broader OR-branches (org-unit approve, direct supervisor) that would
   // leak into a "my own tasks" view if not explicitly filtered here too.
@@ -487,34 +464,6 @@ export async function buildEmployeeSelfTabs(mode: EmployeeSectionsMode): Promise
                   </div>
                 )}
               </section>
-              {!goals || goals.length === 0 ? (
-                <p style={{ color: "var(--sru-muted)", fontSize: 13 }}>{t("goalsEmpty")}</p>
-              ) : (
-                <div className="sru-card">
-                  <div className="table-scroll">
-                    <table className="admin-matrix">
-                      <thead>
-                        <tr>
-                          <th>{t("goalsColumnTitle")}</th>
-                          <th>{t("goalsColumnCycle")}</th>
-                          <th>{t("goalsColumnWeight")}</th>
-                          <th>{t("goalsColumnStatus")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {goals.map((goal) => (
-                          <tr key={goal.id}>
-                            <td>{goal.goal_library?.title_ar ?? goal.custom_title_ar ?? "—"}</td>
-                            <td>{goal.evaluation_cycles?.name_ar ?? "—"}</td>
-                            <td>{goal.weight != null ? `${goal.weight}%` : "—"}</td>
-                            <td>{goal.status}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
             </>
           ),
         },

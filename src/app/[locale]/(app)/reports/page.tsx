@@ -69,21 +69,18 @@ export default async function ReportsPage() {
   // explicitly (not left to each table's broader RLS branches), same
   // discipline as /evaluations/mine and /profile.
   let myEvaluation: { state: EvaluationState; evaluation_cycles: { name_ar: string } | null } | null = null;
-  let myGoalsCount = 0;
   let myTasksCount = 0;
   if (myProfileId) {
-    const [{ data: evalRows }, { count: goalsCount }, { count: tasksCount }] = await Promise.all([
+    const [{ data: evalRows }, { count: tasksCount }] = await Promise.all([
       supabase
         .from("evaluations")
         .select("state, evaluation_cycles(name_ar)")
         .eq("employee_id", myProfileId)
         .order("created_at", { ascending: false })
         .limit(1),
-      supabase.from("goals").select("id", { count: "exact", head: true }).eq("employee_id", myProfileId),
       supabase.from("bau_tasks").select("id", { count: "exact", head: true }).eq("employee_id", myProfileId),
     ]);
     myEvaluation = (evalRows?.[0] as unknown as { state: EvaluationState; evaluation_cycles: { name_ar: string } | null }) ?? null;
-    myGoalsCount = goalsCount ?? 0;
     myTasksCount = tasksCount ?? 0;
   }
 
@@ -370,10 +367,6 @@ export default async function ReportsPage() {
             {myEvaluation ? evaluationStateLabels[myEvaluation.state] : t("myEvaluationNone")}
           </div>
           <div style={labelStyle}>{myEvaluation?.evaluation_cycles?.name_ar ?? t("myEvaluationLabel")}</div>
-        </div>
-        <div className="sru-card" style={cardStyle}>
-          <div style={numberStyle}>{myGoalsCount}</div>
-          <div style={labelStyle}>{t("myGoalsLabel")}</div>
         </div>
         <div className="sru-card" style={cardStyle}>
           <div style={numberStyle}>{myTasksCount}</div>

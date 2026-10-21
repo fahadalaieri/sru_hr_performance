@@ -259,9 +259,7 @@ describe("visibleNavItems", () => {
     // not a role grant) — everything else (employeeData, calibration,
     // promotions, userManagement, orgStructure) is absent (none).
     const employeePermissions = {
-      goalsLibrary: "view",
       competencyFramework: "view",
-      goalAssignment: "view",
       bauTasks: "prepare",
       evaluation: "prepare",
       vacancies: "view",
@@ -362,7 +360,7 @@ describe("visibleNavGroups", () => {
   });
 
   it("still shows both plan groups for a strategy_admin-level permission set", () => {
-    const groups = visibleNavGroups(navGroups, { strategicPlanning: "approve", goalsLibrary: "prepare" });
+    const groups = visibleNavGroups(navGroups, { strategicPlanning: "approve" });
     expect(groups.find((g) => g.groupKey === "strategicPlan")!.children.map((c) => c.segment)).toEqual(["kpis/plans"]);
     expect(groups.find((g) => g.groupKey === "executivePlan")!.children.map((c) => c.segment)).toEqual([
       "operational-plans",
