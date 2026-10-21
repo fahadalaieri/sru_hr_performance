@@ -11,6 +11,9 @@ import { OrgUnitWeightsManager, type OrgUnitWeightsRow } from "@/components/OrgU
 import { summariseCycleScoring, type MethodWeights } from "@/lib/evaluationCycle";
 import { loadContentReadiness, loadCyclePlan, summarisePlan } from "@/lib/cycleEvaluations";
 import { CycleLaunchPanel } from "@/components/CycleLaunchPanel";
+import { CycleDeadlinesForm } from "@/components/CycleDeadlinesForm";
+import { deadlineForState, isOverdue } from "@/lib/evaluationDeadlines";
+import { todayInTimezone } from "@/lib/evaluationCycle";
 
 import {
   canAdvanceEvaluationState,
@@ -55,7 +58,7 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
   const { data: cycle } = await supabase
     .from("evaluation_cycles")
     .select(
-      "id, name_ar, name_en, start_date, end_date, weight_activities, weight_competencies, weight_bau, weight_feedback_360"
+      "id, name_ar, name_en, start_date, end_date, weight_activities, weight_competencies, weight_bau, weight_feedback_360, deadline_submit, deadline_supervisor, deadline_recommend, deadline_approve"
     )
     .eq("id", id)
     .is("deleted_at", null)
@@ -212,6 +215,14 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
     }))
     .sort((a, b) => a.nameAr.localeCompare(b.nameAr, "ar"));
 
+  const today = todayInTimezone("Asia/Riyadh");
+  const deadlines = {
+    deadline_submit: cycle.deadline_submit ?? null,
+    deadline_supervisor: cycle.deadline_supervisor ?? null,
+    deadline_recommend: cycle.deadline_recommend ?? null,
+    deadline_approve: cycle.deadline_approve ?? null,
+  };
+
   function table(rows: EvaluationRow[], emptyMessage: string) {
     if (rows.length === 0) return <p style={{ color: "var(--sru-muted)", fontSize: 12.5 }}>{emptyMessage}</p>;
     return (
@@ -224,6 +235,7 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
               <th>{t("columnEmployeeNumber")}</th>
               <th>{t("columnType")}</th>
               <th>{t("columnState")}</th>
+              <th>{t("columnDue")}</th>
             </tr>
           </thead>
           <tbody>
@@ -254,6 +266,14 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
                   <td>{row.profiles?.employee_number ?? "—"}</td>
                   <td>{evalTypeLabels[row.eval_type]}</td>
                   <td>{evaluationStateLabels[row.state]}</td>
+                  <td>
+                    {(() => {
+                      const due = deadlineForState(deadlines, row.state);
+                      if (!due) return "—";
+                      const late = isOverdue(due, today);
+                      return <span style={{ color: late ? "#b91c1c" : "inherit", fontWeight: late ? 700 : 400 }}>{formatDateDmy(due, locale)}{late ? ` — ${t("dueOverdue")}` : ""}</span>;
+                    })()}
+                  </td>
                 </RowLink>
               );
             })}
@@ -287,7 +307,12 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
     ...(launchSummary ? [{
       id: "launch",
       label: t("subTabLaunch"),
-      content: <CycleLaunchPanel cycleId={cycle.id} initial={launchSummary} canLaunch={canLaunch} readiness={contentReadiness!} />,
+      content: (
+        <>
+          <CycleDeadlinesForm cycleId={cycle.id} initial={deadlines} canEdit={canLaunch} />
+          <CycleLaunchPanel cycleId={cycle.id} initial={launchSummary} canLaunch={canLaunch} readiness={contentReadiness!} />
+        </>
+      ),
     }] : []),
     ...(canViewWeights ? [{
       id: "weights",

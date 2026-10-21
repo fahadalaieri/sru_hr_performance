@@ -149,3 +149,70 @@ export function financeReviewNotification(input: {
     linkPath: `/recruitment/plan/${planId}`,
   };
 }
+
+/* ------------------------------------------------------------------------
+ * تقييم الأداء (2026-10-21, phase 2 item 7) — every state change tells the
+ * next party, and the daily run reminds whoever holds the ball.
+ * ---------------------------------------------------------------------- */
+
+const evaluationStateMessageAr: Record<string, string> = {
+  submitted: "أُرسل تقييم {name} ({cycle}) وهو بانتظار مراجعتك بصفتك الرئيس المباشر",
+  supervisor_reviewed: "أنهى الرئيس المباشر مراجعة تقييم {name} ({cycle}) وهو بانتظار توصيتك",
+  manager_recommended: "أوصى المدير بشأن تقييم {name} ({cycle}) وهو بانتظار مراجعة اللجنة",
+  committee_reviewed: "راجعت اللجنة تقييم {name} ({cycle}) وهو بانتظار الاعتماد النهائي",
+  approved: "اعتُمد تقييم {name} ({cycle}) وصارت نتيجته الرسمية متاحة",
+  finalized: "أُقفل تقييم {name} ({cycle}) نهائيًّا",
+  reopened: "أُعيد فتح تقييم {name} ({cycle}) إلى مرحلة سابقة",
+};
+
+function fill(template: string, name: string, cycle: string): string {
+  return template.replace("{name}", name).replace("{cycle}", cycle);
+}
+
+/** An evaluation moved to `toState` (or was reopened — pass "reopened"). */
+export function evaluationTransitionNotification(input: {
+  toState: string;
+  employeeName: string;
+  cycleName: string;
+  evaluationId: string;
+  reason?: string | null;
+}): NotificationContent {
+  const template = evaluationStateMessageAr[input.toState] ?? "تغيّرت حالة تقييم {name} ({cycle})";
+  const base = fill(template, input.employeeName, input.cycleName);
+  return {
+    type: `evaluation_${input.toState}`,
+    messageAr: input.toState === "reopened" ? withReason(base, input.reason) : `${base}.`,
+    linkPath: `/evaluations/${input.evaluationId}`,
+  };
+}
+
+const reminderPhaseAr: Record<string, string> = {
+  draft: "إرسال التقييم",
+  submitted: "مراجعة الرئيس المباشر",
+  supervisor_reviewed: "توصية المدير",
+  manager_recommended: "مراجعة اللجنة",
+  committee_reviewed: "الاعتماد النهائي",
+  approved: "الإقفال النهائي",
+};
+
+/** A phase deadline is a week away, a day away, or has passed. */
+export function evaluationReminderNotification(input: {
+  kind: "week" | "day" | "overdue";
+  state: string;
+  employeeName: string;
+  cycleName: string;
+  deadline: string;
+  evaluationId: string;
+}): NotificationContent {
+  const phase = reminderPhaseAr[input.state] ?? "المرحلة الحالية";
+  const subject = `تقييم ${input.employeeName} (${input.cycleName})`;
+  const when =
+    input.kind === "week" ? `يحلّ موعد ${phase} خلال أسبوع (${input.deadline})` :
+    input.kind === "day" ? `يحلّ موعد ${phase} غدًا أو اليوم (${input.deadline})` :
+    `فات موعد ${phase} (${input.deadline}) ولم تُنجَز`;
+  return {
+    type: `evaluation_reminder_${input.kind}`,
+    messageAr: `${subject}: ${when}.`,
+    linkPath: `/evaluations/${input.evaluationId}`,
+  };
+}

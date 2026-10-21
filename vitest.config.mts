@@ -25,6 +25,9 @@ export default defineConfig({
     // Integration tests (tests/integration) need a real database and run via
     // `npm run test:integration` with their own config; the default run and
     // CI must never pick them up.
-    exclude: ["**/node_modules/**", "**/.next/**", "tests/**"],
+    // `.claude/worktrees/**` holds whole copies of the repo made by the
+    // desktop app for side tasks; without this their integration tests were
+    // picked up by the unit run (2026-10-21).
+    exclude: ["**/node_modules/**", "**/.next/**", "tests/**", "**/.claude/**"],
   },
 });
