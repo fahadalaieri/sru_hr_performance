@@ -12,23 +12,22 @@ export interface ProfileTab {
 // scrolling page with anchor links was "nice, but" needed to be split into
 // tabs/sidebar/separate pages. Chose top tabs over new routes to avoid
 // re-adding the nav clutter the earlier permission-filtering PR removed —
-// TopBar's UserMenu dropdown still links to `/profile#<id>`, so the initial
-// tab is read from the URL hash via useState's lazy initializer (client-only,
-// runs once on first render) rather than an effect + setState, which would
-// trigger an avoidable extra render.
+// TopBar's UserMenu dropdown still links to `/profile#<id>`.
+//
+// The initial state is ALWAYS the first tab, on the server and on the client.
+// An earlier version read `window.location.hash` inside useState's lazy
+// initializer to skip a render; but the server has no hash and renders the
+// first tab active, so on any `/...#<id>` link the client's first render
+// disagreed with the server markup (aria-selected, className and the panel
+// content) and React logged a hydration-mismatch error on every such
+// navigation (2026-10-21). The hash is applied in the effect below instead,
+// after hydration, so server and client always agree during hydration.
 export function ProfileTabs({ tabs }: { tabs: ProfileTab[] }) {
-  const [activeId, setActiveId] = useState(() => {
-    if (typeof window === "undefined") return tabs[0]?.id;
-    const hash = window.location.hash.replace("#", "");
-    return hash && tabs.some((tab) => tab.id === hash) ? hash : tabs[0]?.id;
-  });
+  const [activeId, setActiveId] = useState(() => tabs[0]?.id);
 
-  // The lazy initializer alone is not enough on a server-rendered page: the
-  // server has no hash, so hydration adopts the FIRST tab and never revisits
-  // it — found live, arriving at `/kpis/plans/<id>#initiatives` from an
-  // initiative still landed on the identity tab. This syncs once after mount
-  // (and on back/forward), which is reading an external browser value, not
-  // deriving state from props.
+  // Reads the URL hash once after mount (and on back/forward) and selects
+  // that tab if it exists. This is reading an external browser value, not
+  // deriving state from props, so an effect is the right place for it.
   useEffect(() => {
     const applyHash = () => {
       const hash = window.location.hash.replace("#", "");
