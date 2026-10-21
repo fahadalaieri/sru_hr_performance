@@ -4,6 +4,8 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildEvaluationResultSnapshot } from "@/lib/evaluationResultSnapshot";
+import { notify } from "@/lib/notify";
+import { evaluationTransitionNotification } from "@/lib/notificationTemplates";
 import {
   canAdvanceEvaluationState,
   evaluationStates,
@@ -20,6 +22,42 @@ export type TransitionEvaluationResult =
       /** For `incomplete`: the weighted methods that have no score (gate, 20261018000003). */
       missing?: string[];
     };
+
+/**
+ * Tells the next party (phase 2 item 7). Recipients come from
+ * `evaluation_actor_profile_ids` — the same relationship the state trigger
+ * enforces — plus the employee and their supervisor once a result exists or
+ * the evaluation is reopened. Fire-and-forget: a failed notification never
+ * undoes the transition that caused it.
+ */
+async function notifyEvaluationParties(
+  admin: ReturnType<typeof createAdminClient>,
+  evaluationId: string,
+  toState: string,
+  reason?: string | null
+): Promise<void> {
+  try {
+    const { data: ev } = await admin
+      .from("evaluations")
+      .select("employee_id, state, profiles(full_name_ar, supervisor_id), evaluation_cycles(name_ar)")
+      .eq("id", evaluationId)
+      .maybeSingle();
+    if (!ev) return;
+    const row = ev as unknown as { employee_id: string; state: string; profiles: { full_name_ar: string; supervisor_id: string | null } | null; evaluation_cycles: { name_ar: string } | null };
+    const { data: actorRows } = await admin.rpc("evaluation_actor_profile_ids", { p_evaluation_id: evaluationId, p_state: row.state });
+    const actors = ((actorRows ?? []) as unknown as Array<string | { evaluation_actor_profile_ids: string }>).map((r) => (typeof r === "string" ? r : r.evaluation_actor_profile_ids));
+    const partiesToo = toState === "approved" || toState === "finalized" || toState === "reopened" ? [row.employee_id, row.profiles?.supervisor_id] : [];
+    await notify(
+      admin,
+      [...actors, ...partiesToo],
+      evaluationTransitionNotification({ toState, employeeName: row.profiles?.full_name_ar ?? "—", cycleName: row.evaluation_cycles?.name_ar ?? "—", evaluationId, reason }),
+      "evaluations",
+      evaluationId
+    );
+  } catch (error) {
+    console.error("notifyEvaluationParties:", error);
+  }
+}
 
 /** Maps a PostgREST/RPC error to the user-facing reason. The database is the boundary (20261018000001/2). */
 function mapDbError(error: { code?: string; message: string }): TransitionEvaluationResult {
@@ -121,6 +159,7 @@ export async function transitionEvaluation(
       before_data: { state: currentState },
       after_data: { state: "approved", result_id: resultId, final_score: snapshot.final_score, rating_band: snapshot.rating_band, applied_weight: snapshot.applied_weight, missing_methods: snapshot.missing_methods, missing_required: snapshot.missing_required, override_reason: snapshot.override_reason ?? null },
     });
+    await notifyEvaluationParties(admin, parsedId.data, "approved");
     return { status: "success", newState: "approved" };
   }
 
@@ -147,6 +186,7 @@ export async function transitionEvaluation(
     before_data: { state: currentState },
     after_data: { state: nextState },
   });
+  await notifyEvaluationParties(admin, parsedId.data, nextState);
 
   return { status: "success", newState: nextState };
 }
@@ -174,6 +214,7 @@ export async function finalizeEvaluation(evaluationId: string): Promise<Transiti
     before_data: { state: "approved" },
     after_data: { state: "finalized" },
   });
+  await notifyEvaluationParties(admin, parsedId.data, "finalized");
   return { status: "success", newState: "finalized" };
 }
 
@@ -222,5 +263,6 @@ export async function reopenEvaluation(_prev: ReopenEvaluationState, formData: F
     before_data: { state: before?.state ?? null },
     after_data: { state: parsed.data.toState, reason: parsed.data.reason },
   });
+  await notifyEvaluationParties(admin, parsed.data.evaluationId, "reopened", parsed.data.reason);
   return { status: "success", newState: parsed.data.toState };
 }
