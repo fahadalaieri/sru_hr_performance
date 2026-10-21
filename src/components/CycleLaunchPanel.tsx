@@ -4,7 +4,8 @@ import { useActionState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { generateCycleEvaluationsAction, type GenerateCycleEvaluationsState } from "@/app/[locale]/(app)/evaluations/cycles/[id]/generate-actions";
-import type { CyclePlanSummary } from "@/lib/cycleEvaluations";
+import { Link } from "@/i18n/navigation";
+import type { ContentReadiness, CyclePlanSummary } from "@/lib/cycleEvaluations";
 import type { IneligibilityReason } from "@/lib/cycleEligibility";
 
 const reasonKeys: Record<IneligibilityReason, string> = {
@@ -21,7 +22,7 @@ const reasonKeys: Record<IneligibilityReason, string> = {
  * shown first is computed server-side on page load; the action recomputes it
  * before writing, so a stale page never creates on stale numbers.
  */
-export function CycleLaunchPanel({ cycleId, initial, canLaunch }: { cycleId: string; initial: CyclePlanSummary; canLaunch: boolean }) {
+export function CycleLaunchPanel({ cycleId, initial, canLaunch, readiness }: { cycleId: string; initial: CyclePlanSummary; canLaunch: boolean; readiness: ContentReadiness }) {
   const t = useTranslations("EvaluationCyclePage");
   const router = useRouter();
   const [state, action, pending] = useActionState<GenerateCycleEvaluationsState, FormData>(generateCycleEvaluationsAction, null);
@@ -70,6 +71,20 @@ export function CycleLaunchPanel({ cycleId, initial, canLaunch }: { cycleId: str
       {state?.status === "success" && state.dryRun && (
         <p role="status" style={{ color: "var(--sru-purple)", fontSize: 12.5, marginBottom: 12 }}>{t("launchPreviewed")}</p>
       )}
+
+      <section className="sru-card" style={{ padding: "12px 14px", marginBottom: 14 }}>
+        <h3 style={{ fontSize: 13.5, margin: "0 0 4px" }}>{t("readinessHeading")}</h3>
+        <p style={{ color: "var(--sru-muted)", fontSize: 12, margin: "0 0 10px", lineHeight: 1.8 }}>{t("readinessNote")}</p>
+        <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 12.5, lineHeight: 2 }}>
+          <li>
+            {t("readinessNoTitle", { count: readiness.withoutJobTitle, eligible: readiness.eligible })} <Link href="/employees">{t("readinessFixEmployees")}</Link>
+          </li>
+          <li>
+            {t("readinessBareTitles", { titles: readiness.titlesWithoutCompetencies, employees: readiness.employeesOnTitlesWithoutCompetencies })} <Link href="/career-path/job-titles">{t("readinessFixTitles")}</Link>
+          </li>
+          <li>{t("readinessUnitWeights", { count: readiness.unitsWithoutOwnWeights })}</li>
+        </ul>
+      </section>
 
       {summary.notReady.length > 0 && (
         <details open={summary.notReady.length <= 12}>

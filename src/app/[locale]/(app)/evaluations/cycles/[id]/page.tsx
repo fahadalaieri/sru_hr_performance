@@ -9,7 +9,7 @@ import { formatDateDmy } from "@/lib/dateParts";
 import { CycleMethodWeightsForm } from "@/components/CycleMethodWeightsForm";
 import { OrgUnitWeightsManager, type OrgUnitWeightsRow } from "@/components/OrgUnitWeightsManager";
 import { summariseCycleScoring, type MethodWeights } from "@/lib/evaluationCycle";
-import { loadCyclePlan, summarisePlan } from "@/lib/cycleEvaluations";
+import { loadContentReadiness, loadCyclePlan, summarisePlan } from "@/lib/cycleEvaluations";
 import { CycleLaunchPanel } from "@/components/CycleLaunchPanel";
 
 import {
@@ -89,6 +89,7 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
   const canLaunch = canLaunchData === true;
   const launchPlan = canLaunch ? await loadCyclePlan(supabase, id) : null;
   const launchSummary = launchPlan ? summarisePlan(launchPlan) : null;
+  const contentReadiness = launchPlan ? await loadContentReadiness(supabase, id, launchPlan) : null;
 
   // Direct reports only — profiles.supervisor_id, the same relationship the
   // review policies use.
@@ -286,7 +287,7 @@ export default async function EvaluationCyclePage({ params }: { params: Promise<
     ...(launchSummary ? [{
       id: "launch",
       label: t("subTabLaunch"),
-      content: <CycleLaunchPanel cycleId={cycle.id} initial={launchSummary} canLaunch={canLaunch} />,
+      content: <CycleLaunchPanel cycleId={cycle.id} initial={launchSummary} canLaunch={canLaunch} readiness={contentReadiness!} />,
     }] : []),
     ...(canViewWeights ? [{
       id: "weights",

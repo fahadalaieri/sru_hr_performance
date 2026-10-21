@@ -49,6 +49,46 @@ export async function loadCyclePlan(supabase: SupabaseClient, cycleId: string): 
   return planCycleEvaluations((profiles ?? []) as PlanProfile[], cycle, withEvaluation);
 }
 
+/**
+ * Content readiness for the eligible population (phase 2 item 6): what the
+ * evaluation will actually be scored on. Informational — none of it blocks
+ * launching, because the core competencies apply to everyone and the cycle
+ * weights apply where a unit has none of its own.
+ */
+export interface ContentReadiness {
+  eligible: number;
+  withoutJobTitle: number;
+  /** Job titles held by eligible employees that have no linked competencies (count of titles, and of the employees on them). */
+  titlesWithoutCompetencies: number;
+  employeesOnTitlesWithoutCompetencies: number;
+  unitsWithoutOwnWeights: number;
+}
+
+export async function loadContentReadiness(supabase: SupabaseClient, cycleId: string, plan: CyclePlan<PlanProfile>): Promise<ContentReadiness> {
+  const eligible = [...plan.existing, ...plan.toCreate];
+  const { data: titled } = eligible.length > 0
+    ? await supabase.from("profiles").select("id, job_title_id, org_unit_id").in("id", eligible.map((p) => p.id))
+    : { data: [] as { id: string; job_title_id: string | null; org_unit_id: string | null }[] };
+  const rows = (titled ?? []) as { id: string; job_title_id: string | null; org_unit_id: string | null }[];
+  const titleIds = [...new Set(rows.map((r) => r.job_title_id).filter((x): x is string => !!x))];
+  const unitIds = [...new Set(rows.map((r) => r.org_unit_id).filter((x): x is string => !!x))];
+  const [{ data: linked }, { data: weighted }] = await Promise.all([
+    titleIds.length > 0 ? supabase.from("job_title_competencies").select("job_title_id").in("job_title_id", titleIds).is("deleted_at", null) : Promise.resolve({ data: [] as { job_title_id: string }[] }),
+    unitIds.length > 0 ? supabase.from("org_unit_evaluation_weights").select("org_unit_id").eq("cycle_id", cycleId).in("org_unit_id", unitIds).is("deleted_at", null) : Promise.resolve({ data: [] as { org_unit_id: string }[] }),
+  ]);
+  const titlesWithCompetencies = new Set(((linked ?? []) as { job_title_id: string }[]).map((r) => r.job_title_id));
+  const unitsWithWeights = new Set(((weighted ?? []) as { org_unit_id: string }[]).map((r) => r.org_unit_id));
+  const bareTitles = titleIds.filter((t) => !titlesWithCompetencies.has(t));
+  const bareTitleSet = new Set(bareTitles);
+  return {
+    eligible: rows.length,
+    withoutJobTitle: rows.filter((r) => !r.job_title_id).length,
+    titlesWithoutCompetencies: bareTitles.length,
+    employeesOnTitlesWithoutCompetencies: rows.filter((r) => r.job_title_id && bareTitleSet.has(r.job_title_id)).length,
+    unitsWithoutOwnWeights: unitIds.filter((u) => !unitsWithWeights.has(u)).length,
+  };
+}
+
 export interface GenerateOutcome {
   summary: CyclePlanSummary;
   created: number;

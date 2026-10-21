@@ -29,10 +29,7 @@ export function hasVpraAccess(actual: VpraLevel, required: VpraLevel): boolean {
 }
 
 export type ProcessArea =
-  | "goalsLibrary"
   | "competencyFramework"
-  | "defaultTemplates"
-  | "goalAssignment"
   | "bauTasks"
   | "evaluation"
   | "calibration"
@@ -59,11 +56,12 @@ export type ProcessArea =
   | "threeSixty"
   | "evaluationResultsReports";
 
+// goalsLibrary / defaultTemplates / goalAssignment were retired on 2026-10-21
+// (migration 20261021000001): no screens ever backed them and goals left the
+// weighted score in 20260828000001. The enum values still exist in Postgres;
+// the vocabulary here simply no longer lists them.
 export const processAreas: ProcessArea[] = [
-  "goalsLibrary",
   "competencyFramework",
-  "defaultTemplates",
-  "goalAssignment",
   "bauTasks",
   "evaluation",
   "calibration",
@@ -99,10 +97,7 @@ export const processAreas: ProcessArea[] = [
  * `ProcessArea` identifiers.
  */
 export const processAreaLabels: Record<ProcessArea, string> = {
-  goalsLibrary: "بنك الأهداف",
   competencyFramework: "إطار الجدارات",
-  defaultTemplates: "القوالب الافتراضية",
-  goalAssignment: "إسناد الأهداف",
   bauTasks: "المهام التشغيلية",
   evaluation: "التقييم",
   calibration: "المعايرة",
@@ -203,13 +198,10 @@ export const processAreaSections: ProcessAreaSection[] = [
       "evaluation",
       "threeSixty",
       "calibration",
-      "goalsLibrary",
-      "goalAssignment",
       "strategicPlanning",
       "evaluationWeights",
       "bauTasks",
       "competencyFramework",
-      "defaultTemplates",
     ],
   },
   {

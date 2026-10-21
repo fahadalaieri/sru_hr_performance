@@ -1696,7 +1696,7 @@
     "columnRequiredLevel": "Required Level",
     "competenciesFromEmployee": "Competencies assigned specifically to this employee (from their own profile), independent of their job title's shared ones.",
     "competenciesFromJobTitle": "Competencies required for the job title \"{jobTitle}\" (from the Career Path screen).",
-    "competenciesFromFramework": "No competencies are assigned to this employee or their job title yet — showing the full competency framework instead."
+    "competenciesFromCore": "No competencies are assigned to this employee or their job title yet — only the core (applies-to-everyone) competencies are scored; specialised ones come through the job title or the employee's record."
   },
   "EvaluationScoresPage": {
     "title": "Enter Scores",
@@ -1705,7 +1705,7 @@
     "competenciesEmpty": "No competencies in the framework.",
     "competenciesFromEmployee": "Competencies assigned specifically to this employee (from their own profile), independent of their job title's shared ones.",
     "competenciesFromJobTitle": "Competencies required for the job title \"{jobTitle}\" (from the Career Path screen).",
-    "competenciesFromFramework": "No competencies are assigned to this employee or their job title yet — showing the full competency framework instead.",
+    "competenciesFromCore": "No competencies are assigned to this employee or their job title yet — only the core (applies-to-everyone) competencies are scored; specialised ones come through the job title or the employee's record.",
     "goalsHeading": "Goals",
     "goalsEmpty": "No goals assigned to this employee in this cycle.",
     "columnSubject": "Item",
@@ -3516,6 +3516,13 @@
     "columnState": "Approval stage",
     "subTabWeights": "Weight distribution",
     "subTabLaunch": "Launch the cycle",
+    "readinessHeading": "Content readiness",
+    "readinessNote": "What the eligible employees will actually be scored on. Nothing here blocks launching: core competencies apply to everyone, and the cycle weights apply where a unit has none of its own.",
+    "readinessNoTitle": "{count} of {eligible} eligible employees have no official job title, so only their core competencies are scored.",
+    "readinessFixEmployees": "Assign titles on the Employees page",
+    "readinessBareTitles": "{titles} job titles in use have no linked competencies (held by {employees} employees).",
+    "readinessFixTitles": "Link competencies on the Job Titles page",
+    "readinessUnitWeights": "{count} units have no weight distribution of their own in this cycle (the cycle weights apply).",
     "launchNote": "The cycle population by the eligibility rule: an active, approved employee with an org unit and a line manager, hired at least three months before the cycle midpoint when a hire date is on record. Creation adds one draft supervisor evaluation per eligible employee who has none; existing ones are untouched.",
     "launchEligible": "Eligible",
     "launchExisting": "Have an evaluation",
